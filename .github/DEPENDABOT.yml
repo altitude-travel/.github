@@ -1,0 +1,86 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "npm"
+      - "dependencies"
+    groups:
+      production-dependencies:
+        dependency-type: "production"
+        patterns:
+          - "*"
+      development-dependencies:
+        dependency-type: "development"
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "🧹 chore"
+      include: "scope"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "github-actions"
+      - "dependencies"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "🔧 ci"
+      include: "scope"
+
+  - package-ecosystem: "terraform"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "terraform"
+      - "dependencies"
+    groups:
+      terraform-providers:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "🏗️ infra"
+      include: "scope"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "docker"
+      - "dependencies"
+    groups:
+      docker-images:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "🐳 docker"
+      include: "scope"
+
+  - package-ecosystem: "swift"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "swift"
+      - "dependencies"
+    groups:
+      swift-packages:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "🧹 chore"
+      include: "scope"

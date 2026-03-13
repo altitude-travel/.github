@@ -4,12 +4,15 @@
   managed centrally by the
   [github-policies](https://github.com/altitude-travel/github-policies)
   repository and will be overwritten on every policy sync.
-- All project-specific rules, conventions, and instructions for AI agents live
-  in `AGENTS.md` at the repository root. Treat `AGENTS.md` as your primary
-  instruction set.
+- **`AGENTS.md` is mandatory** — you MUST read `AGENTS.md` at the repository
+  root before starting any task, without exception. All project-specific rules,
+  conventions, and instructions for AI agents live in that file. Treat
+  `AGENTS.md` as your primary instruction set and follow every rule it contains.
+  Do not skip, override, or selectively apply its instructions.
 - Any new rules, changes to existing rules, or removal of rules must be done in
   `AGENTS.md`, never in this file.
-- Always read and reference `AGENTS.md` before starting any task.
+- If `AGENTS.md` exists, you must read it in full and comply with all of its
+  requirements for every task — no partial reads, no assumptions.
 
 ## Documentation Roles
 
