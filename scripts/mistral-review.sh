@@ -14,16 +14,19 @@ ROOT_DIRECTORY="$(dirname "$SCRIPT_DIRECTORY")"
 readonly ROOT_DIRECTORY
 
 # ---------------------------------------------------------------------------
-# Configuration — maximum file size for review and the system prompt that
-# instructs the Vibe CLI how to analyse code.
+# Configuration — maximum file size for review and constants for the
+# Mistral API integration.
 # ---------------------------------------------------------------------------
 readonly MAX_FILE_SIZE_BYTES=500000
 
-# Maximum total content size per Vibe CLI batch (bytes). Each batch prompt
-# must fit within the OS ARG_MAX limit (~2MB on Linux). We use 1MB as the
-# threshold to leave headroom for the prompt template, environment variables,
-# and JSON encoding overhead.
+# Maximum total content size per review batch (bytes). The HTTP request body
+# has no hard size limit, but keeping batches under 1MB avoids excessive
+# token counts and keeps response times reasonable.
 readonly MAX_BATCH_CONTENT_BYTES=1000000
+
+# Mistral API endpoint and model for code review
+readonly MISTRAL_API_URL="https://api.mistral.ai/v1/chat/completions"
+readonly MISTRAL_MODEL="devstral-latest"
 readonly REVIEW_PREAMBLE="You are a code reviewer. Find REAL bugs and security vulnerabilities ONLY.
 
 RULES:
@@ -50,7 +53,7 @@ function print_information {
 function print_usage {
 	printf "Usage: %s [OPTIONS]\n" "$0"
 	printf "\n"
-	printf "Reviews code using Mistral Vibe CLI.\n"
+	printf "Reviews code using the Mistral API.\n"
 	printf "\n"
 	printf "Options:\n"
 	printf "  -h, --help    Show this help message and exit\n"
@@ -114,7 +117,7 @@ function check_mistral_auth {
 		return 0
 	fi
 
-	# Attempt to read the key from the Vibe CLI env file
+	# Attempt to read the key from the local env file
 	local vibe_env_file="${HOME}/.vibe/.env"
 	if [[ ! -f ${vibe_env_file} ]]; then
 		print_error "MISTRAL_API_KEY not set and ${vibe_env_file} not found"
@@ -131,10 +134,15 @@ function check_mistral_auth {
 }
 
 # ---------------------------------------------------------------------------
-# Retrieve the list of changed files to review. In GitHub Actions, fetches
-# the file list from the PR API; locally, uses git diff against main.
+# Retrieve the list of changed files with their diff data. In GitHub Actions,
+# fetches from the PR API; locally, uses git diff against main.
+#
+# Writes a JSON array of {filename, patch, status} objects to the output file.
+# Returns 0 on success, 1 on failure.
 # ---------------------------------------------------------------------------
 function get_changed_files {
+	local output_file="$1"
+
 	if [[ -n ${GITHUB_REPOSITORY:-} && -n ${GITHUB_PULL_REQUEST_NUMBER:-} ]]; then
 		# Running in GitHub Actions — fetch changed files from the PR API
 		validate_github_env
@@ -145,146 +153,504 @@ function get_changed_files {
 			return 1
 		fi
 
-		# Filter to only modified or added files
-		echo "${api_response}" | jq --raw-output '
-			.[] | select(.status == "modified" or .status == "added") | .filename
-		' 2>/dev/null || {
+		# Extract filename, patch, and status for modified/added files
+		echo "${api_response}" | jq --compact-output '
+			[.[] | select(.status == "modified" or .status == "added") |
+			 {filename: .filename, patch: (.patch // ""), status: .status}]
+		' >"${output_file}" 2>/dev/null || {
 			print_error "Failed to parse changed files response"
 			return 1
 		}
 	else
-		# Running locally — use git diff to find changes since main
-		git diff --name-only main HEAD 2>/dev/null || echo ""
-	fi
-}
+		# Running locally — use git diff to produce unified diff and parse
+		# into the same JSON structure as the GitHub API path
+		local diff_output
+		diff_output=$(git diff --no-color main HEAD 2>/dev/null || echo "")
 
-# ---------------------------------------------------------------------------
-# Invoke the Vibe CLI with a prompt and optional output mode. Applies a
-# 600-second timeout and falls back to a safe default on failure.
-#
-# JSON mode (--output json): vibe returns a conversation array of
-#   {role, content} objects. The last assistant message is extracted,
-#   markdown code fences are stripped, and the content is validated as JSON.
-#
-# Text mode (default): vibe returns plain text directly.
-# ---------------------------------------------------------------------------
-function invoke_vibe {
-	local mode="$1"
-	local prompt="$2"
-	local args=()
-	local fallback="[]"
-
-	# When requesting JSON output, add the --output flag
-	if [[ ${mode} == "json" ]]; then
-		args+=(--output json)
-	else
-		fallback="No summary available."
-	fi
-
-	# Execute the Vibe CLI with a 600-second timeout.
-	# Callers must ensure the prompt fits within the OS ARG_MAX limit
-	# (~2MB on Linux) — the review_files function handles this via batching.
-	# Stderr is captured separately for diagnostics rather than discarded.
-	local result
-	local vibe_stderr
-	local vibe_exit_code=0
-	vibe_stderr=$(mktemp)
-	result=$(timeout 600 vibe --prompt "${prompt}" "${args[@]}" 2>"${vibe_stderr}") || vibe_exit_code=$?
-
-	# Log diagnostics when vibe fails or returns empty output.
-	# These messages must go to stderr (>&2) because this function is called
-	# inside command substitutions, where stdout is captured into a variable.
-	if [[ ${vibe_exit_code} -ne 0 ]]; then
-		print_error "Vibe CLI exited with code ${vibe_exit_code} (mode=${mode})"
-		if [[ -s ${vibe_stderr} ]]; then
-			print_error "Vibe CLI stderr: $(cat "${vibe_stderr}")"
-		fi
-		if [[ -n ${result} ]]; then
-			print_error "Vibe CLI stdout: ${result}"
-		fi
-		result="${fallback}"
-	elif [[ -z ${result} ]]; then
-		print_error "Vibe CLI returned empty output (mode=${mode})"
-		result="${fallback}"
-	fi
-	rm --force "${vibe_stderr}"
-
-	if [[ ${mode} == "json" ]]; then
-		# JSON mode: extract the last assistant message from the conversation array
-		local extracted
-		extracted=$(echo "${result}" | jq --raw-output '
-			[.[] | select(.role == "assistant")] | last | .content // empty
-		' 2>/dev/null || echo "")
-
-		if [[ -z ${extracted} ]]; then
-			print_error "Failed to extract assistant message from Vibe response"
-		fi
-
-		# Strip markdown code fences that models often wrap JSON responses in
-		if [[ -n ${extracted} ]]; then
-			extracted=$(printf '%s\n' "${extracted}" | sed '/^```/d')
-		fi
-
-		# Validate the extracted content is valid JSON
-		if echo "${extracted}" | jq --exit-status 'type == "array" or type == "object"' >/dev/null 2>&1; then
-			echo "${extracted}"
+		if [[ -z ${diff_output} ]]; then
+			echo "[]" >"${output_file}"
 			return 0
 		fi
 
-		# Recovery: the model may have embedded a JSON array inside conversational
-		# text. Try to extract the first top-level JSON array from the response.
-		if [[ -n ${extracted} ]]; then
-			local embedded
-			embedded=$(printf '%s\n' "${extracted}" | sed -n '/^\[/,/^\]/p' | jq --exit-status '.' 2>/dev/null || echo "")
-			if [[ -n ${embedded} ]] && echo "${embedded}" | jq --exit-status 'type == "array"' >/dev/null 2>&1; then
-				print_information "Recovered JSON array from conversational response"
-				echo "${embedded}"
-				return 0
+		# Parse unified diff into JSON: extract filename, patch, and status
+		local entries_file
+		entries_file=$(mktemp)
+		local current_file=""
+		local current_patch=""
+		local in_patch=false
+
+		while IFS= read -r line; do
+			# Detect new file header
+			if [[ ${line} == "diff --git"* ]]; then
+				# Write previous file entry if we have one
+				if [[ -n ${current_file} ]]; then
+					jq --null-input \
+						--arg filename "${current_file}" \
+						--arg patch "${current_patch}" \
+						'{filename: $filename, patch: $patch, status: "modified"}' >>"${entries_file}"
+				fi
+
+				# Extract filename from the b/ side of the diff header
+				current_file="${line##* b/}"
+				current_patch=""
+				in_patch=false
+			elif [[ ${line} == "@@"* ]]; then
+				# Start of a hunk — begin capturing patch text
+				in_patch=true
+				if [[ -n ${current_patch} ]]; then
+					current_patch="${current_patch}
+${line}"
+				else
+					current_patch="${line}"
+				fi
+			elif [[ ${in_patch} == true ]]; then
+				# Inside a hunk — accumulate patch lines
+				current_patch="${current_patch}
+${line}"
 			fi
+		done <<<"${diff_output}"
+
+		# Write the last file entry
+		if [[ -n ${current_file} ]]; then
+			jq --null-input \
+				--arg f "${current_file}" \
+				--arg p "${current_patch}" \
+				'{filename: $f, patch: $p, status: "modified"}' >>"${entries_file}"
 		fi
 
-		# Recovery: retry once — the model occasionally ignores the JSON format
-		# instruction on the first attempt but usually complies on a second try.
-		print_information "Vibe response was not valid JSON, retrying once (first 200 chars: ${extracted:0:200})"
-		local retry_result
-		local retry_stderr
+		# Combine all entries into a single JSON array
+		if [[ -s ${entries_file} ]]; then
+			jq --slurp '.' "${entries_file}" >"${output_file}"
+		else
+			echo "[]" >"${output_file}"
+		fi
+		rm --force "${entries_file}"
+	fi
+
+	return 0
+}
+
+# ---------------------------------------------------------------------------
+# Parse unified diff patch text to build a map of valid RIGHT-side line
+# numbers per file. These are the line numbers that GitHub will accept for
+# line-level review comments.
+#
+# Reads the PR files JSON and writes a JSON array of
+# {filename, valid_lines: [int...]} objects to the output file.
+# ---------------------------------------------------------------------------
+function parse_diff_hunks {
+	local pr_files_json="$1"
+	local output_file="$2"
+
+	local entries_file
+	entries_file=$(mktemp)
+
+	# Process each file's patch text
+	local file_count
+	file_count=$(jq 'length' "${pr_files_json}")
+	local i=0
+
+	while [[ ${i} -lt ${file_count} ]]; do
+		local filename
+		filename=$(jq --raw-output ".[${i}].filename" "${pr_files_json}")
+		local patch
+		patch=$(jq --raw-output ".[${i}].patch // \"\"" "${pr_files_json}")
+
+		local valid_lines=""
+		local new_line_num=0
+
+		# Parse the patch line by line to find valid RIGHT-side line numbers
+		if [[ -n ${patch} ]]; then
+			while IFS= read -r line; do
+				if [[ ${line} =~ ^@@[[:space:]]-[0-9]+(,[0-9]+)?[[:space:]]\+([0-9]+)(,([0-9]+))?[[:space:]]@@ ]]; then
+					# Hunk header — extract the new-side start line
+					new_line_num=${BASH_REMATCH[2]}
+				elif [[ ${line} == "+"* ]]; then
+					# Addition line — valid for comments, increment counter
+					if [[ -n ${valid_lines} ]]; then
+						valid_lines="${valid_lines},${new_line_num}"
+					else
+						valid_lines="${new_line_num}"
+					fi
+					new_line_num=$((new_line_num + 1))
+				elif [[ ${line} == " "* ]]; then
+					# Context line — valid for comments, increment counter
+					if [[ -n ${valid_lines} ]]; then
+						valid_lines="${valid_lines},${new_line_num}"
+					else
+						valid_lines="${new_line_num}"
+					fi
+					new_line_num=$((new_line_num + 1))
+				elif [[ ${line} == "-"* ]]; then
+					# Deletion line — old side only, do NOT increment
+					:
+				fi
+			done <<<"${patch}"
+		fi
+
+		# Write the entry for this file
+		jq --null-input \
+			--arg filename "${filename}" \
+			--argjson valid_lines "[${valid_lines}]" \
+			'{filename: $filename, valid_lines: $valid_lines}' >>"${entries_file}"
+
+		i=$((i + 1))
+	done
+
+	# Combine all entries into a single JSON array
+	if [[ -s ${entries_file} ]]; then
+		jq --slurp '.' "${entries_file}" >"${output_file}"
+	else
+		echo "[]" >"${output_file}"
+	fi
+	rm --force "${entries_file}"
+}
+
+# ---------------------------------------------------------------------------
+# Map each validated issue to its correct diff position by finding the
+# code_snippet in the actual file content and checking against the diff map.
+#
+# Adds in_diff, mapped_line, and mapped_start_line fields to each issue.
+# ---------------------------------------------------------------------------
+function map_issues_to_diff {
+	local validated_result="$1"
+	local files_json_file="$2"
+	local diff_map_file="$3"
+
+	# Ensure the input is a valid JSON array
+	if ! echo "${validated_result}" | jq --exit-status 'type == "array"' >/dev/null 2>&1; then
+		echo "[]"
+		return
+	fi
+
+	local result_file
+	result_file=$(mktemp)
+	local snippet_file
+	snippet_file=$(mktemp)
+
+	# Process each file entry in the validated result
+	local file_count
+	file_count=$(echo "${validated_result}" | jq 'length')
+	local i=0
+
+	while [[ ${i} -lt ${file_count} ]]; do
+		local file_path
+		file_path=$(echo "${validated_result}" | jq --raw-output ".[${i}].file_path")
+
+		# Get the file content from the files JSON
+		local file_content
+		file_content=$(jq --raw-output \
+			--arg filepath "${file_path}" \
+			'[.[] | select(.path == $filepath)] | .[0].content // ""' \
+			"${files_json_file}")
+
+		# Get valid lines for this file from the diff map
+		local valid_lines_json
+		valid_lines_json=$(jq --raw-output \
+			--arg filename "${file_path}" \
+			'[.[] | select(.filename == $filename)] | .[0].valid_lines // []' \
+			"${diff_map_file}")
+
+		# Process each issue in this file entry
+		local issue_count
+		issue_count=$(echo "${validated_result}" | jq ".[${i}].issues | length")
+		local mapped_issues="[]"
+		local j=0
+
+		while [[ ${j} -lt ${issue_count} ]]; do
+			local issue
+			issue=$(echo "${validated_result}" | jq ".[${i}].issues[${j}]")
+			local code_snippet
+			code_snippet=$(echo "${issue}" | jq --raw-output '.code_snippet // ""')
+
+			if [[ -n ${code_snippet} && -n ${file_content} ]]; then
+				# Write content and snippet to temp files for grep lookup
+				printf '%s\n' "${file_content}" >"${snippet_file}.content"
+				printf '%s' "${code_snippet}" >"${snippet_file}.snippet"
+
+				# Find the line number of the first occurrence of the snippet
+				local first_line
+				first_line=$(grep -n -F -f "${snippet_file}.snippet" "${snippet_file}.content" 2>/dev/null | head -1 | cut -d: -f1 || echo "")
+
+				if [[ -n ${first_line} ]]; then
+					# Count lines in the snippet to determine range
+					local snippet_lines
+					snippet_lines=$(echo "${code_snippet}" | wc -l | tr --delete ' ')
+					local last_line=$((first_line + snippet_lines - 1))
+
+					# Check which lines in the range are in the diff
+					local in_diff=false
+					local mapped_line=""
+					local mapped_start_line=""
+
+					local line_num=${first_line}
+					while [[ ${line_num} -le ${last_line} ]]; do
+						# Check if this line is in the valid_lines array
+						if echo "${valid_lines_json}" | jq --exit-status "index(${line_num})" >/dev/null 2>&1; then
+							in_diff=true
+							if [[ -z ${mapped_start_line} ]]; then
+								mapped_start_line=${line_num}
+							fi
+							mapped_line=${line_num}
+						fi
+						line_num=$((line_num + 1))
+					done
+
+					# Add mapping fields to the issue
+					if [[ ${in_diff} == true ]]; then
+						issue=$(echo "${issue}" | jq \
+							--argjson in_diff true \
+							--argjson mapped_line "${mapped_line}" \
+							--argjson mapped_start_line "${mapped_start_line}" \
+							'. + {in_diff: $in_diff, mapped_line: $mapped_line, mapped_start_line: $mapped_start_line}')
+					else
+						issue=$(echo "${issue}" | jq '. + {in_diff: false}')
+					fi
+				else
+					issue=$(echo "${issue}" | jq '. + {in_diff: false}')
+				fi
+			else
+				issue=$(echo "${issue}" | jq '. + {in_diff: false}')
+			fi
+
+			mapped_issues=$(echo "${mapped_issues}" | jq --argjson issue "${issue}" '. + [$issue]')
+			j=$((j + 1))
+		done
+
+		# Write the file entry with mapped issues
+		echo "${validated_result}" | jq \
+			--argjson issues "${mapped_issues}" \
+			".[${i}] | .issues = \$issues" >>"${result_file}"
+
+		i=$((i + 1))
+	done
+
+	# Combine all file entries into a single JSON array
+	if [[ -s ${result_file} ]]; then
+		jq --slurp '.' "${result_file}"
+	else
+		echo "[]"
+	fi
+	rm --force "${result_file}" "${snippet_file}" "${snippet_file}.content" "${snippet_file}.snippet" 2>/dev/null
+}
+
+# ---------------------------------------------------------------------------
+# Merge diff patch data from the PR files JSON into the loaded file entries.
+# Adds a "diff" field to each file entry containing its unified diff patch.
+# ---------------------------------------------------------------------------
+function merge_diff_data {
+	local files_json_file="$1"
+	local pr_files_json="$2"
+
+	# Add the patch text from PR files to each loaded file entry
+	jq --slurpfile pr_files "${pr_files_json}" '
+		[.[] | . as $entry |
+		 ($pr_files[0] // [] | map(select(.filename == $entry.path)) | .[0].patch // "") as $patch |
+		 $entry + {diff: $patch}]
+	' "${files_json_file}" >"${files_json_file}.tmp" && mv "${files_json_file}.tmp" "${files_json_file}"
+}
+
+# ---------------------------------------------------------------------------
+# Fetch the repository's AGENTS.md file content for injection into the
+# review prompt. The repo is already checked out, so read from the working
+# directory root. The full file is loaded — the batch budget arithmetic
+# accounts for its size automatically.
+# Returns content via stdout, or empty string if not found.
+# ---------------------------------------------------------------------------
+function fetch_agents_md {
+	local agents_file="${ROOT_DIRECTORY}/AGENTS.md"
+
+	if [[ ! -f ${agents_file} ]]; then
+		echo ""
+		return
+	fi
+
+	cat "${agents_file}" 2>/dev/null || echo ""
+}
+
+# ---------------------------------------------------------------------------
+# Call the Mistral Chat Completions API with a prompt. The prompt is written
+# to a temp file and sent as an HTTP request body via curl, so there is no
+# OS ARG_MAX limit on prompt size.
+#
+# JSON mode: requests response_format: json_object. The API returns the
+#   assistant message content directly (no conversation array wrapper).
+#   Markdown code fences are stripped and the content is validated as JSON.
+#
+# Text mode: returns the assistant message content as plain text.
+# ---------------------------------------------------------------------------
+function call_mistral_api {
+	local mode="$1"
+	local prompt="$2"
+	local fallback="[]"
+
+	if [[ ${mode} != "json" ]]; then
+		fallback="No summary available."
+	fi
+
+	# Write the prompt to a temp file so jq can read it via --rawfile,
+	# avoiding the OS ARG_MAX limit that occurs with --arg on large prompts.
+	local prompt_file
+	prompt_file=$(mktemp)
+	printf '%s' "${prompt}" >"${prompt_file}"
+
+	# Build the API request body in a temp file
+	local request_file
+	request_file=$(mktemp)
+
+	if [[ ${mode} == "json" ]]; then
+		jq --null-input \
+			--arg model "${MISTRAL_MODEL}" \
+			--rawfile prompt "${prompt_file}" \
+			'{
+				model: $model,
+				messages: [{role: "user", content: $prompt}],
+				response_format: {type: "json_object"}
+			}' >"${request_file}"
+	else
+		jq --null-input \
+			--arg model "${MISTRAL_MODEL}" \
+			--rawfile prompt "${prompt_file}" \
+			'{
+				model: $model,
+				messages: [{role: "user", content: $prompt}]
+			}' >"${request_file}"
+	fi
+	rm --force "${prompt_file}"
+
+	# Call the Mistral API with a 600-second timeout
+	local http_code
+	local response_file
+	response_file=$(mktemp)
+	local curl_exit_code=0
+
+	http_code=$(timeout 600 curl --silent --show-error \
+		--write-out '%{http_code}' \
+		--output "${response_file}" \
+		--header "Authorization: Bearer ${MISTRAL_API_KEY}" \
+		--header "Content-Type: application/json" \
+		--data "@${request_file}" \
+		"${MISTRAL_API_URL}" 2>&1) || curl_exit_code=$?
+	rm --force "${request_file}"
+
+	# Log diagnostics on failure
+	if [[ ${curl_exit_code} -ne 0 ]]; then
+		print_error "Mistral API call failed with curl exit code ${curl_exit_code}"
+		rm --force "${response_file}"
+		echo "${fallback}"
+		return
+	fi
+
+	if [[ ${http_code} -ne 200 ]]; then
+		print_error "Mistral API returned HTTP ${http_code}: $(cat "${response_file}")"
+		rm --force "${response_file}"
+		echo "${fallback}"
+		return
+	fi
+
+	# Extract the assistant message content from the API response
+	local content
+	content=$(jq --raw-output '.choices[0].message.content // empty' "${response_file}" 2>/dev/null || echo "")
+	rm --force "${response_file}"
+
+	if [[ -z ${content} ]]; then
+		print_error "Mistral API returned empty content (mode=${mode})"
+		echo "${fallback}"
+		return
+	fi
+
+	if [[ ${mode} == "json" ]]; then
+		# Strip markdown code fences that models sometimes wrap JSON in
+		content=$(printf '%s\n' "${content}" | sed '/^```/d')
+
+		# Validate the content is valid JSON and extract the results array.
+		# The prompt asks for {"results": [...]}, but the model may return
+		# a bare array. Handle both cases.
+		if echo "${content}" | jq --exit-status 'type == "object" or type == "array"' >/dev/null 2>&1; then
+			# If it is an object with a results key, extract the array
+			local extracted_array
+			extracted_array=$(echo "${content}" | jq 'if type == "object" and has("results") then .results else . end' 2>/dev/null || echo "[]")
+			echo "${extracted_array}"
+			return 0
+		fi
+
+		# Recovery: the model may have embedded a JSON array inside
+		# conversational text. Try to extract the first top-level JSON
+		# structure from the response.
+		local embedded
+		embedded=$(printf '%s\n' "${content}" | sed -n '/^[\[{]/,/^[\]}]/p' | jq --exit-status '.' 2>/dev/null || echo "")
+		if [[ -n ${embedded} ]] && echo "${embedded}" | jq --exit-status 'type == "object" or type == "array"' >/dev/null 2>&1; then
+			print_information "Recovered JSON from conversational response"
+			local recovered
+			recovered=$(echo "${embedded}" | jq 'if type == "object" and has("results") then .results else . end' 2>/dev/null || echo "[]")
+			echo "${recovered}"
+			return 0
+		fi
+
+		# Recovery: retry once — the model occasionally ignores the JSON
+		# format instruction on the first attempt
+		print_information "API response was not valid JSON, retrying once (first 200 chars: ${content:0:200})"
+
+		local retry_prompt_file
+		retry_prompt_file=$(mktemp)
+		printf '%s' "${prompt}" >"${retry_prompt_file}"
+
+		local retry_request_file
+		retry_request_file=$(mktemp)
+		jq --null-input \
+			--arg model "${MISTRAL_MODEL}" \
+			--rawfile prompt "${retry_prompt_file}" \
+			'{
+				model: $model,
+				messages: [{role: "user", content: $prompt}],
+				response_format: {type: "json_object"}
+			}' >"${retry_request_file}"
+		rm --force "${retry_prompt_file}"
+
+		local retry_response_file
+		retry_response_file=$(mktemp)
+		local retry_http_code
 		local retry_exit_code=0
-		retry_stderr=$(mktemp)
-		retry_result=$(timeout 600 vibe --prompt "${prompt}" "${args[@]}" 2>"${retry_stderr}") || retry_exit_code=$?
-		rm --force "${retry_stderr}"
 
-		if [[ ${retry_exit_code} -eq 0 && -n ${retry_result} ]]; then
-			local retry_extracted
-			retry_extracted=$(echo "${retry_result}" | jq --raw-output '
-				[.[] | select(.role == "assistant")] | last | .content // empty
-			' 2>/dev/null || echo "")
+		retry_http_code=$(timeout 600 curl --silent --show-error \
+			--write-out '%{http_code}' \
+			--output "${retry_response_file}" \
+			--header "Authorization: Bearer ${MISTRAL_API_KEY}" \
+			--header "Content-Type: application/json" \
+			--data "@${retry_request_file}" \
+			"${MISTRAL_API_URL}" 2>&1) || retry_exit_code=$?
+		rm --force "${retry_request_file}"
 
-			if [[ -n ${retry_extracted} ]]; then
-				retry_extracted=$(printf '%s\n' "${retry_extracted}" | sed '/^```/d')
+		if [[ ${retry_exit_code} -eq 0 && ${retry_http_code} -eq 200 ]]; then
+			local retry_content
+			retry_content=$(jq --raw-output '.choices[0].message.content // empty' "${retry_response_file}" 2>/dev/null || echo "")
+
+			if [[ -n ${retry_content} ]]; then
+				retry_content=$(printf '%s\n' "${retry_content}" | sed '/^```/d')
 			fi
 
-			if echo "${retry_extracted}" | jq --exit-status 'type == "array" or type == "object"' >/dev/null 2>&1; then
+			if echo "${retry_content}" | jq --exit-status 'type == "array" or type == "object"' >/dev/null 2>&1; then
 				print_information "Retry succeeded, got valid JSON response"
-				echo "${retry_extracted}"
+				rm --force "${retry_response_file}"
+				echo "${retry_content}" | jq 'if type == "object" and has("results") then .results else . end'
 				return 0
 			fi
 		fi
+		rm --force "${retry_response_file}"
 
-		print_error "Vibe response is not valid JSON after retry, falling back to empty array"
+		print_error "API response is not valid JSON after retry, falling back to empty array"
 		echo "[]"
 	else
-		# Text mode: vibe returns plain text directly; guard against empty output
-		if [[ -n ${result} ]]; then
-			echo "${result}"
-		else
-			echo "${fallback}"
-		fi
+		# Text mode: return the content directly
+		echo "${content}"
 	fi
 }
 
 # ---------------------------------------------------------------------------
-# Transform the batch review result into a flat array of line-level comments
-# suitable for posting to the GitHub PR review API.
+# Transform the mapped review result into a flat array of line-level comments
+# suitable for posting to the GitHub PR review API. Only includes issues
+# that are on diff lines (in_diff == true). Uses mapped_line for accurate
+# positioning and adds side: "RIGHT" for all comments.
 # ---------------------------------------------------------------------------
 function build_line_comments {
 	local batch_result="$1"
@@ -296,19 +662,87 @@ function build_line_comments {
 	fi
 
 	# Flatten file-level issues into individual comment objects.
-	# Issues without a code_snippet are discarded — the model must prove each
-	# issue by quoting the exact offending code from the file.
+	# Only issues with in_diff == true and a non-empty code_snippet are included.
+	# Uses mapped_line for the line position and adds side: "RIGHT".
+	# Multi-line comments use start_line + start_side when available.
+	# Format: category label, severity, message, diff block showing offending
+	# code with - prefix, and a collapsible agent prompt at the bottom.
 	echo "${batch_result}" | jq --compact-output '
 		[.[] | . as $file |
 			(.issues // [])[] |
 			select(.code_snippet != null and .code_snippet != "") |
+			select(.in_diff == true) |
+			(.category // "Review") as $category |
+			(.message | split(". ") | .[0] | if endswith(".") then . else . + "." end) as $title |
+			(.code_snippet | split("\n") | map("- " + .) | join("\n")) as $diff_lines |
 			{
 				path: $file.file_path,
-				body: ("**\(.severity // "info")**: \(.message)\n\n```\n\(.code_snippet)\n```"),
-				line: (.line // 1)
-			}
+				body: (
+					"**\($category)** (\(.severity // "info"))\n\n" +
+					"**\($title)**\n\n" +
+					"\(.message)\n\n" +
+					"```diff\n\($diff_lines)\n```\n\n" +
+					"<details>\n<summary>Agent prompt</summary>\n\n" +
+					"In `\($file.file_path)` at line \(.mapped_line): \(.message)\n\n" +
+					"</details>"
+				),
+				line: .mapped_line,
+				side: "RIGHT"
+			} +
+			(if .mapped_start_line != null and .mapped_start_line != .mapped_line then
+				{start_line: .mapped_start_line, start_side: "RIGHT"}
+			else {} end)
 		]
 	' 2>/dev/null || echo "[]"
+}
+
+# ---------------------------------------------------------------------------
+# Validate the batch review result against the actual file contents. Two
+# programmatic filters catch hallucinations that the code_snippet non-empty
+# check alone cannot:
+#
+# 1. code_snippet must appear verbatim in the source file — catches complete
+#    fabrications where the model invents file paths, code, or both
+# 2. Issues flagging GitHub Actions secrets references (${{ secrets.* }}) as
+#    "hardcoded" or "exposed" are false positives — the secrets syntax is the
+#    correct way to reference credentials
+#
+# Returns a cleaned batch result with fabricated issues removed.
+# ---------------------------------------------------------------------------
+function validate_batch_result {
+	local batch_result="$1"
+	local files_json_file="$2"
+
+	# Ensure the input is a valid JSON array
+	if ! echo "${batch_result}" | jq --exit-status 'type == "array"' >/dev/null 2>&1; then
+		echo "[]"
+		return
+	fi
+
+	# Validate each issue against the actual source file content
+	echo "${batch_result}" | jq --slurpfile files "${files_json_file}" '
+		[.[] | . as $entry |
+			($files[0] // [] | map(select(.path == $entry.file_path)) | .[0] // null) as $source |
+			{
+				file_path: $entry.file_path,
+				issues: [
+					($entry.issues // [])[] |
+					. as $issue |
+					select(
+						$issue.code_snippet != null and
+						$issue.code_snippet != "" and
+						$source != null and
+						($source.content | contains($issue.code_snippet)) and
+						(
+							(($issue.code_snippet | test("\\$\\{\\{\\s*secrets\\.")) and
+							 ($issue.message | test("hardcoded|exposed|leak|credential|private.key"; "i")))
+							| not
+						)
+					)
+				]
+			}
+		]
+	' 2>/dev/null || echo "${batch_result}"
 }
 
 # ---------------------------------------------------------------------------
@@ -469,7 +903,7 @@ function load_file_contents {
 			continue
 		fi
 
-		jq --null-input --arg p "${file}" --rawfile c "${file}" '{path: $p, content: $c}' >>"${entries_file}"
+		jq --null-input --arg path "${file}" --rawfile content "${file}" '{path: $path, content: $content}' >>"${entries_file}"
 	done < <(echo "${files}")
 
 	# Combine all entries into a single JSON array and write to the output file
@@ -483,40 +917,61 @@ function load_file_contents {
 
 # ---------------------------------------------------------------------------
 # Build the review prompt template. Accepts a JSON array of files as $1
-# and returns the complete prompt string for the Vibe CLI.
+# and optional AGENTS.md content as $2 for project-specific conventions.
+# Returns the complete prompt string for the Mistral API. Each file entry
+# includes path, content, and diff fields.
 # ---------------------------------------------------------------------------
 function build_review_prompt {
 	local batch_json="$1"
+	local agents_md_content="${2:-}"
+
+	# Inject AGENTS.md project conventions when available
+	local agents_section=""
+	if [[ -n ${agents_md_content} ]]; then
+		agents_section="
+PROJECT CONVENTIONS (from the repository's AGENTS.md — you MUST respect these):
+${agents_md_content}
+
+When reviewing code, respect these project-specific conventions and rules. Do NOT flag code that follows these conventions as an issue.
+
+"
+	fi
 
 	printf '%s' "${REVIEW_PREAMBLE}
-
+${agents_section}
 INPUT DATA STRUCTURE:
 [
   {
     \"path\": \"filename.ext\",
-    \"content\": \"complete file contents\"
+    \"content\": \"complete file contents\",
+    \"diff\": \"unified diff patch showing what changed in this PR\"
   }
 ]
+
+The diff field contains the unified diff for each file. Lines prefixed with + are additions, lines prefixed with - are deletions, and lines prefixed with a space are context. Focus your review on the lines shown in the diff (prefixed with + for additions). The full file content is provided for context only. Do NOT report issues for code that was not changed in this PR unless it is directly affected by the changes.
 
 RESPONSE FORMAT:
-You MUST respond with ONLY a valid JSON array — no markdown, no explanation, no text before or after the JSON. Do NOT wrap the JSON in code fences. Your entire response must be parseable by a JSON parser.
+You MUST respond with ONLY valid JSON — no markdown, no explanation, no text before or after the JSON. Do NOT wrap the JSON in code fences. Your entire response must be parseable by a JSON parser.
 
-You MUST return one entry per reviewed file. If a file has no issues, include it with an empty issues array.
+You MUST return a JSON object with a single key \"results\" containing an array. Each array entry represents one reviewed file. If a file has no issues, include it with an empty issues array.
 
-OUTPUT DATA STRUCTURE (JSON array):
-[
-  {
-    \"file_path\": \"filename.ext\",
-    \"issues\": [
-      {
-        \"line\": <line_number>,
-        \"message\": \"clear description of the actual issue\",
-        \"severity\": \"info|warning|error|critical\",
-        \"code_snippet\": \"the exact code from the file that proves this issue — copy-paste verbatim\"
-      }
-    ]
-  }
-]
+OUTPUT DATA STRUCTURE (JSON object):
+{
+  \"results\": [
+    {
+      \"file_path\": \"filename.ext\",
+      \"issues\": [
+        {
+          \"line\": <line_number>,
+          \"message\": \"clear description of the actual issue\",
+          \"severity\": \"info|warning|error|critical\",
+          \"code_snippet\": \"the exact code from the file that proves this issue — copy-paste verbatim\",
+          \"category\": \"Bug|Security|Performance|Refactor|Style|Documentation\"
+        }
+      ]
+    }
+  ]
+}
 
 IMPORTANT:
 - Every issue MUST have a non-empty code_snippet field with the exact code from the file. Issues without code_snippet will be automatically discarded.
@@ -529,13 +984,14 @@ ${batch_json}"
 }
 
 # ---------------------------------------------------------------------------
-# Send file contents to the Vibe CLI for batch review. Splits files into
-# batches that fit within the OS ARG_MAX limit (~2MB on Linux) to prevent
-# "Argument list too long" errors on large PRs. Results from all batches
-# are merged into a single JSON array.
+# Send file contents to the Mistral API for batch review. Splits files into
+# batches by content size to keep token counts reasonable and avoid
+# excessive API response times on large PRs. Results from all batches are
+# merged into a single JSON array.
 # ---------------------------------------------------------------------------
 function review_files {
 	local files_json_file="$1"
+	local agents_md_content="${2:-}"
 
 	local total_files
 	total_files=$(jq 'length' "${files_json_file}")
@@ -543,6 +999,15 @@ function review_files {
 	if [[ ${total_files} -eq 0 ]]; then
 		echo "[]"
 		return
+	fi
+
+	# Adjust batch budget to account for AGENTS.md overhead in the prompt.
+	# The 50KB headroom covers the prompt template, JSON encoding, and
+	# environment variable overhead.
+	local agents_md_size=${#agents_md_content}
+	local effective_budget=$((MAX_BATCH_CONTENT_BYTES - agents_md_size - 50000))
+	if [[ ${effective_budget} -lt 100000 ]]; then
+		effective_budget=100000
 	fi
 
 	# Get the content size of each file entry (one size per line)
@@ -569,7 +1034,7 @@ function review_files {
 
 			# Start a new batch if adding this file would exceed the limit
 			# (but always include at least one file per batch)
-			if [[ $((batch_size + entry_size)) -gt ${MAX_BATCH_CONTENT_BYTES} && ${batch_end} -gt ${batch_start} ]]; then
+			if [[ $((batch_size + entry_size)) -gt ${effective_budget} && ${batch_end} -gt ${batch_start} ]]; then
 				break
 			fi
 
@@ -589,11 +1054,11 @@ function review_files {
 			print_information "Reviewing batch of ${batch_file_count} files (${batch_size} bytes of content)"
 		fi
 
-		# Build the prompt and invoke the Vibe CLI
+		# Build the prompt and call the Mistral API
 		local batch_prompt
-		batch_prompt=$(build_review_prompt "${batch_json}")
+		batch_prompt=$(build_review_prompt "${batch_json}" "${agents_md_content}")
 		local batch_result
-		batch_result=$(invoke_vibe "json" "${batch_prompt}")
+		batch_result=$(call_mistral_api "json" "${batch_prompt}")
 
 		# Append this batch's results for later merging
 		echo "${batch_result}" >>"${results_file}"
@@ -607,85 +1072,280 @@ function review_files {
 }
 
 # ---------------------------------------------------------------------------
-# Generate a human-readable Markdown summary of the review results using
-# the Vibe CLI. Applies a strict six-section template and falls back to a
-# default summary if generation fails.
+# Build the Changes table programmatically from the actual file list.
+# This is deterministic — the model cannot hallucinate file names.
+# ---------------------------------------------------------------------------
+function build_changes_table {
+	local pr_files_json="$1"
+
+	local table_header="| File | Status |
+|------|--------|"
+
+	local table_rows
+	table_rows=$(jq --raw-output '
+		.[] | "| `\(.filename)` | \(.status) |"
+	' "${pr_files_json}" 2>/dev/null || echo "")
+
+	if [[ -z ${table_rows} ]]; then
+		echo "${table_header}
+| — | No files found |"
+	else
+		printf '%s\n%s' "${table_header}" "${table_rows}"
+	fi
+}
+
+# ---------------------------------------------------------------------------
+# Extract issues of a given severity from the validated result, formatted
+# as a markdown bullet list. Returns empty string if no issues match.
+# ---------------------------------------------------------------------------
+function build_issue_list_by_severity {
+	local validated_result="$1"
+	local severity="$2"
+
+	echo "${validated_result}" | jq --raw-output --arg severity "${severity}" '
+		[.[] | . as $file | (.issues // [])[] |
+		 select(.code_snippet != null and .code_snippet != "") |
+		 select(.severity == $severity) |
+		 "- **`\($file.file_path):\(.line // 0)`** \u2014 \(.message)"] | .[]
+	' 2>/dev/null || echo ""
+}
+
+# ---------------------------------------------------------------------------
+# Generate a 1-2 paragraph walkthrough of the PR changes using the Mistral
+# API. Receives only file names and diff patches (not full content) to keep
+# the prompt small and focused. Falls back to a simple file count summary
+# if the API call fails.
+# ---------------------------------------------------------------------------
+function generate_walkthrough {
+	local pr_files_json="$1"
+
+	local file_count
+	file_count=$(jq 'length' "${pr_files_json}" 2>/dev/null || echo "0")
+
+	# Build a condensed input to prevent the model from parroting code back:
+	# - Added files: filename and status only (purpose is clear from the name)
+	# - Modified files: hunk headers only (e.g. "@@ ... @@ function foo {")
+	#   which show WHAT changed without exposing the full diff content
+	local diff_summary
+	diff_summary=$(jq --compact-output '[.[] | if .status == "added" then {filename, status} else {filename, status, hunks: ((.patch // "") | split("\n") | map(select(startswith("@@"))) | join("\n"))} end]' "${pr_files_json}" 2>/dev/null || echo "[]")
+
+	# Programmatic fallback used when the API call fails
+	local fallback
+	fallback="This PR modifies ${file_count} file(s)."
+
+	local walkthrough_prompt
+	walkthrough_prompt="You are writing a short summary of a pull request for a code reviewer. Below are the changed files with their status and diffs. Write 1-2 short paragraphs.
+
+Each file has a status field:
+- \"added\": a new file introduced by this PR. Only the filename is provided — infer its purpose from the name.
+- \"modified\": an existing file changed by this PR. The \"hunks\" field shows diff hunk headers indicating which sections/functions were changed, e.g. \"@@ -10,5 +10,8 @@ function foo {\" means the function foo was modified.
+
+RULES:
+1. Summarise the OVERALL PURPOSE of the PR in 1-2 sentences, then briefly note the key changes.
+2. Do NOT describe how code works internally or list features the code provides. A reviewer can read the code.
+3. Plain prose only — no bullet points, no numbered lists, no headings, no markdown.
+4. Do NOT list file names — a separate table already shows them.
+5. Use British English. Be concise. Maximum 2 paragraphs.
+
+FILES:
+${diff_summary}"
+
+	local result
+	result=$(call_mistral_api "text" "${walkthrough_prompt}")
+
+	# Use the model output if it looks reasonable, otherwise fall back
+	if [[ -n ${result} && ${result} != "No summary available." ]]; then
+		echo "${result}"
+	else
+		echo "${fallback}"
+	fi
+}
+
+# ---------------------------------------------------------------------------
+# Build the complete review summary. The walkthrough is generated by the
+# model from diff data; the changes table and issues sections are fully
+# programmatic to prevent hallucination in actionable content.
+#
+# Sections:
+#   1. Walkthrough — model-generated prose summary of the changes
+#   2. Changes — table of files with status (from build_changes_table)
+#   3. Issues — grouped by severity from the validated review result
 # ---------------------------------------------------------------------------
 function generate_summary {
-	local batch_result="$1"
+	local validated_result="$1"
+	local changes_table="$2"
+	local pr_files_json="$3"
 
-	local summary_prompt="${REVIEW_PREAMBLE}
+	# Walkthrough section — model-generated prose summary
+	local walkthrough_text
+	walkthrough_text=$(generate_walkthrough "${pr_files_json}")
 
-GOAL: Generate a human-readable Markdown summary of code review results suitable for a GitHub PR review comment.
+	local walkthrough
+	walkthrough="## Walkthrough
 
-INPUT DATA STRUCTURE:
-${batch_result}
+${walkthrough_text}"
 
-NOTE: If the input contains no issues (empty issues arrays), that means the code review analysed all changed files and found no problems. You MUST still produce the full template below — fill each section explaining that no issues were found and highlight positive aspects of the code. If the input is an empty array ([]), state that the automated review could not produce results and recommend a manual review.
+	# Issues section — grouped by severity from validated result
+	local total_issues
+	total_issues=$(echo "${validated_result}" | jq '[.[]?.issues[]?] | length' 2>/dev/null || echo "0")
 
-OUTPUT:
-Return ONLY a Markdown-formatted text summary (NOT JSON). You MUST use the EXACT template below, filling in each section. If a section has no relevant content, you MUST still include the heading and write a single sentence explaining why there are no comments for that section (e.g. 'No critical or error-level issues were identified.').
+	local issues_section
+	if [[ ${total_issues} -eq 0 ]]; then
+		issues_section="## Issues
 
-TEMPLATE (follow this structure exactly):
+No issues were identified in the reviewed files."
+	else
+		# Build issue lists grouped by severity. Uses a helper function
+		# to avoid repeating the jq filter for each severity level.
+		local critical_items error_items warning_items info_items
+		critical_items=$(build_issue_list_by_severity "${validated_result}" "critical")
+		error_items=$(build_issue_list_by_severity "${validated_result}" "error")
+		warning_items=$(build_issue_list_by_severity "${validated_result}" "warning")
+		info_items=$(build_issue_list_by_severity "${validated_result}" "info")
 
-## Overall Assessment
+		issues_section="## Issues
 
-<One or two sentences summarising the overall quality of the changes.>
+${total_issues} issue(s) identified."
 
-## Critical and Error Issues
+		if [[ -n ${critical_items} ]]; then
+			issues_section="${issues_section}
 
-<List any critical or error severity issues found. If none, state why.>
+### Critical
 
-## Warnings
+${critical_items}"
+		fi
+		if [[ -n ${error_items} ]]; then
+			issues_section="${issues_section}
 
-<List any warning severity issues found. If none, state why.>
+### Error
 
-## Informational Notes
+${error_items}"
+		fi
+		if [[ -n ${warning_items} ]]; then
+			issues_section="${issues_section}
 
-<List any info severity observations. If none, state why.>
+### Warning
 
-## Positive Aspects
+${warning_items}"
+		fi
+		if [[ -n ${info_items} ]]; then
+			issues_section="${issues_section}
 
-<Highlight good practices, clean code, or well-handled areas.>
+### Info
 
-## Recommendations
-
-<Actionable suggestions for improvement. If none, state why.>
-
-REQUIREMENTS:
-- Your response MUST start with '## Overall Assessment' — no preamble, introduction, or conversational text before it
-- You MUST include ALL six sections listed above, in order
-- Each section MUST have content — either findings or an explanation of why there are none
-- ONLY report issues that are present in the INPUT DATA — do NOT invent, assume, or hallucinate issues. If an issue is not in the input JSON, it MUST NOT appear in the summary. The summary is a reformatting of the input, not an independent review
-- Be specific, factual, and professional
-- Use bullet points within sections where multiple items exist
-- Do NOT add extra sections or change the headings
-- NEVER return a one-line response — always produce the full template"
-
-	local summary
-	summary=$(invoke_vibe "text" "${summary_prompt}")
-
-	# Strip markdown code fences that some models wrap their response in
-	if printf '%s\n' "${summary}" | grep --quiet --extended-regexp '^```'; then
-		summary=$(printf '%s\n' "${summary}" | sed '/^```/d')
+${info_items}"
+		fi
 	fi
 
-	# Strip any preamble text before the first markdown heading
-	if printf '%s\n' "${summary}" | grep --quiet '^#'; then
-		summary=$(printf '%s\n' "${summary}" | sed -n '/^#/,$p')
+	# Assemble the complete summary
+	printf '%s\n\n## Changes\n\n%s\n\n%s' \
+		"${walkthrough}" "${changes_table}" "${issues_section}"
+}
+
+# ---------------------------------------------------------------------------
+# Build a collapsible nitpicks section from info-severity issues in the
+# validated result. Returns the markdown block or empty string if no
+# info-level issues exist.
+# ---------------------------------------------------------------------------
+function build_nitpicks_section {
+	local validated_result="$1"
+
+	# Extract info-severity issues with file path context
+	local nitpick_items
+	nitpick_items=$(echo "${validated_result}" | jq --raw-output '
+		[.[] | . as $file |
+			(.issues // [])[] |
+			select(.severity == "info") |
+			select(.code_snippet != null and .code_snippet != "") |
+			"- **`\($file.file_path):\(.line // "?")`** — Minor: \(.message)"
+		] | .[]
+	' 2>/dev/null || echo "")
+
+	if [[ -z ${nitpick_items} ]]; then
+		return
 	fi
 
-	# Use fallback template if summary generation failed or returned empty
-	if [[ -z ${summary} || ${summary} == "No summary available." ]]; then
-		print_error "Summary generation failed, using fallback template"
-		summary="## Automated Review Failed
+	# Count the nitpick items
+	local nitpick_count
+	nitpick_count=$(echo "${nitpick_items}" | grep --count . || echo "0")
 
-The review model did not return a usable summary. This does not indicate issues with the code itself — please review the changes manually.
+	cat <<NITPICKS
 
-If this keeps happening, please drop James a message on Basecamp with a link to this PR so he can investigate."
+<details>
+<summary>Nitpicks (${nitpick_count})</summary>
+
+${nitpick_items}
+
+</details>
+NITPICKS
+}
+
+# ---------------------------------------------------------------------------
+# Build a collapsible agent prompt section covering ALL issues from the
+# validated result. Returns the markdown block or empty string if no
+# issues exist.
+# ---------------------------------------------------------------------------
+function build_agent_prompt_section {
+	local validated_result="$1"
+
+	# Build numbered list of all issues with file path and severity
+	local prompt_items
+	prompt_items=$(echo "${validated_result}" | jq --raw-output '
+		[.[] | . as $file |
+			(.issues // [])[] |
+			select(.code_snippet != null and .code_snippet != "") |
+			{path: $file.file_path, line: (.line // "?"), severity: (.severity // "info"), message: .message}
+		] | to_entries | .[] |
+		"\(.key + 1). **`\(.value.path):\(.value.line)`** (\(.value.severity)) — \(.value.message)"
+	' 2>/dev/null || echo "")
+
+	if [[ -z ${prompt_items} ]]; then
+		return
 	fi
 
-	echo "${summary}"
+	cat <<AGENTPROMPT
+
+<details>
+<summary>Agent prompt</summary>
+
+Please address the following code review findings:
+
+${prompt_items}
+
+</details>
+AGENTPROMPT
+}
+
+# ---------------------------------------------------------------------------
+# Build a collapsible review metadata section with deterministic statistics
+# about the review run. Returns the markdown block.
+# ---------------------------------------------------------------------------
+function build_metadata_section {
+	local files_reviewed="$1"
+	local total_issues="$2"
+	local critical_count="$3"
+	local error_count="$4"
+	local warning_count="$5"
+	local info_count="$6"
+	local in_diff_count="$7"
+	local validated_count="$8"
+	local raw_count="$9"
+
+	# Build as a single string to avoid printf fragmentation issues.
+	# GitHub requires a blank line after </summary> for content to render.
+	cat <<METADATA
+
+<details>
+<summary>Review metadata</summary>
+
+- **Model**: Devstral 2 (${MISTRAL_MODEL})
+- **Files reviewed**: ${files_reviewed}
+- **Issues found**: ${total_issues} (${critical_count} critical, ${error_count} error, ${warning_count} warning, ${info_count} info)
+- **Issues on diff lines**: ${in_diff_count} of ${total_issues}
+- **Source validation**: ${validated_count} of ${raw_count} issues verified against file contents
+
+</details>
+METADATA
 }
 
 # ---------------------------------------------------------------------------
@@ -736,15 +1396,22 @@ function main {
 	# Authenticate with the Mistral API
 	check_mistral_auth
 
-	# Step 1: Discover changed files
-	local files
-	if ! files=$(get_changed_files); then
+	# Step 1: Discover changed files with diff data
+	local pr_files_json
+	pr_files_json=$(mktemp)
+	if ! get_changed_files "${pr_files_json}"; then
 		print_error "Failed to retrieve changed files"
+		rm --force "${pr_files_json}"
 		exit 1
 	fi
 
+	# Extract filenames from the PR files JSON
+	local files
+	files=$(jq --raw-output '.[].filename' "${pr_files_json}" 2>/dev/null || echo "")
+
 	if [[ -z ${files} ]]; then
 		print_information "No files to review"
+		rm --force "${pr_files_json}"
 		exit 0
 	fi
 
@@ -761,37 +1428,113 @@ function main {
 	loaded_count=$(jq 'length' "${files_json_file}" 2>/dev/null || echo "0")
 	print_information "Loaded ${loaded_count} files for review"
 
-	# Step 3: Review files with the Vibe CLI (batched to stay under ARG_MAX)
-	print_information "Reviewing all files with Vibe CLI"
+	# Step 2b: Merge diff patch data into loaded file entries so the model
+	# receives both file content and the specific changes for each file
+	merge_diff_data "${files_json_file}" "${pr_files_json}"
+
+	# Step 2c: Fetch AGENTS.md for project-specific convention injection
+	local agents_md_content
+	agents_md_content=$(fetch_agents_md)
+	if [[ -n ${agents_md_content} ]]; then
+		print_information "Loaded AGENTS.md (${#agents_md_content} characters) for review context"
+	fi
+
+	# Step 3: Review files via the Mistral API (batched for large PRs)
+	print_information "Reviewing all files with Mistral API"
 	local batch_result
-	batch_result=$(review_files "${files_json_file}")
-	rm --force "${files_json_file}"
+	batch_result=$(review_files "${files_json_file}" "${agents_md_content}")
 
 	# Log the batch review result size for diagnostics
 	local batch_issue_count
 	batch_issue_count=$(echo "${batch_result}" | jq '[.[]?.issues[]?] | length' 2>/dev/null || echo "0")
 	print_information "Batch review returned ${batch_issue_count} issues across $(echo "${batch_result}" | jq 'length' 2>/dev/null || echo "0") file entries"
 
-	# Derive line comments and statistics from the batch result
+	# Step 3b: Validate issues against actual file contents — catches
+	# fabricated code snippets, invented file paths, and false positives
+	# about GitHub Actions secrets references
+	local validated_result
+	validated_result=$(validate_batch_result "${batch_result}" "${files_json_file}")
+
+	local validated_issue_count
+	validated_issue_count=$(echo "${validated_result}" | jq '[.[]?.issues[]?] | length' 2>/dev/null || echo "0")
+	print_information "After source validation: ${validated_issue_count} of ${batch_issue_count} issues verified against file contents"
+
+	# Step 4: Build diff line map and map issues to diff positions
+	local diff_map_file
+	diff_map_file=$(mktemp)
+	parse_diff_hunks "${pr_files_json}" "${diff_map_file}"
+
+	local mapped_result
+	mapped_result=$(map_issues_to_diff "${validated_result}" "${files_json_file}" "${diff_map_file}")
+
+	# Log how many issues landed on diff lines
+	local in_diff_count
+	in_diff_count=$(echo "${mapped_result}" | jq '[.[]?.issues[]? | select(.in_diff == true)] | length' 2>/dev/null || echo "0")
+	print_information "Issues on diff lines: ${in_diff_count} of ${validated_issue_count}"
+
+	# Derive line comments from mapped result (only in-diff issues)
 	local all_comments
-	all_comments=$(build_line_comments "${batch_result}")
+	all_comments=$(build_line_comments "${mapped_result}")
 
 	local comment_count
 	comment_count=$(echo "${all_comments}" | jq 'length' 2>/dev/null || echo "0")
-	print_information "After code_snippet filter: ${comment_count} of ${batch_issue_count} issues retained"
+	print_information "After diff mapping and code_snippet filter: ${comment_count} comments for line-level posting"
 
 	# Only flag as critical for confirmed critical-severity issues; errors may
 	# stem from stale model knowledge and should not trigger change requests
 	local has_critical
-	has_critical=$(echo "${batch_result}" | jq '[.[]?.issues[]? | select(.severity == "critical") | select(.code_snippet != null and .code_snippet != "")] | length > 0' 2>/dev/null || echo "false")
+	has_critical=$(echo "${mapped_result}" | jq '[.[]?.issues[]? | select(.severity == "critical") | select(.code_snippet != null and .code_snippet != "")] | length > 0' 2>/dev/null || echo "false")
 
-	# Step 4: Generate a human-readable Markdown summary
+	# Step 5: Generate the review summary and append programmatic sections.
+	# The changes table is built programmatically from the actual file list
+	# to prevent the model from hallucinating file names. The model only
+	# generates the walkthrough and issues sections.
 	print_information "Generating text summary for review comment"
+	local changes_table
+	changes_table=$(build_changes_table "${pr_files_json}")
 	local summary_text
-	summary_text=$(generate_summary "${batch_result}")
+	summary_text=$(generate_summary "${validated_result}" "${changes_table}" "${pr_files_json}")
 
-	# Step 5: Submit the review with line comments and summary
+	# Append collapsible nitpicks section (info-severity issues only)
+	local nitpicks_section
+	nitpicks_section=$(build_nitpicks_section "${mapped_result}")
+	if [[ -n ${nitpicks_section} ]]; then
+		summary_text="${summary_text}${nitpicks_section}"
+	fi
+
+	# Append collapsible agent prompt section (all issues)
+	local agent_prompt_section
+	agent_prompt_section=$(build_agent_prompt_section "${mapped_result}")
+	if [[ -n ${agent_prompt_section} ]]; then
+		summary_text="${summary_text}${agent_prompt_section}"
+	fi
+
+	# Compute severity counts for metadata
+	local critical_count error_count warning_count info_count
+	critical_count=$(echo "${mapped_result}" | jq '[.[]?.issues[]? | select(.severity == "critical")] | length' 2>/dev/null || echo "0")
+	error_count=$(echo "${mapped_result}" | jq '[.[]?.issues[]? | select(.severity == "error")] | length' 2>/dev/null || echo "0")
+	warning_count=$(echo "${mapped_result}" | jq '[.[]?.issues[]? | select(.severity == "warning")] | length' 2>/dev/null || echo "0")
+	info_count=$(echo "${mapped_result}" | jq '[.[]?.issues[]? | select(.severity == "info")] | length' 2>/dev/null || echo "0")
+
+	# Append collapsible review metadata section
+	local metadata_section
+	metadata_section=$(build_metadata_section \
+		"${loaded_count}" \
+		"${validated_issue_count}" \
+		"${critical_count}" \
+		"${error_count}" \
+		"${warning_count}" \
+		"${info_count}" \
+		"${in_diff_count}" \
+		"${validated_issue_count}" \
+		"${batch_issue_count}")
+	summary_text="${summary_text}${metadata_section}"
+
+	# Step 6: Submit the review with line comments and summary
 	submit_review "${comment_count}" "${has_critical}" "${summary_text}" "${all_comments}"
+
+	# Clean up all temp files
+	rm --force "${pr_files_json}" "${files_json_file}" "${diff_map_file}"
 }
 
 main "$@"
