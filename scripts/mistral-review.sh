@@ -746,6 +746,129 @@ function validate_batch_result {
 }
 
 # ---------------------------------------------------------------------------
+# Resolve all review threads started by github-actions[bot] on a pull
+# request. Uses the GraphQL API since thread resolution is not available
+# via REST. Threads are resolved before comments are deleted so that
+# conversations collapse in the PR UI.
+# ---------------------------------------------------------------------------
+function resolve_bot_threads {
+	local pr_number="$1"
+	local owner="${GITHUB_REPOSITORY%%/*}"
+	local repo="${GITHUB_REPOSITORY##*/}"
+
+	# GraphQL query to fetch all review threads with first comment author.
+	# Stored in a variable via heredoc to avoid SC2016 (GraphQL $var syntax
+	# looks like shell expansion inside single quotes).
+	local threads_query
+	threads_query=$(
+		cat <<-'GRAPHQL'
+			query($owner: String!, $name: String!, $number: Int!) {
+				repository(owner: $owner, name: $name) {
+					pullRequest(number: $number) {
+						reviewThreads(first: 100) {
+							nodes {
+								id
+								isResolved
+								comments(first: 1) {
+									nodes {
+										author {
+											login
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		GRAPHQL
+	)
+
+	# Fetch all review threads on the PR with the author of the first comment
+	local threads_response
+	if ! threads_response=$(gh_api_with_retry graphql \
+		-f owner="${owner}" \
+		-f name="${repo}" \
+		-F number="${pr_number}" \
+		-f query="${threads_query}"); then
+		print_information "Could not fetch review threads, skipping resolution"
+		return 0
+	fi
+
+	# Extract unresolved thread IDs where the first comment is from the bot
+	local thread_ids
+	thread_ids=$(echo "${threads_response}" | jq --raw-output '
+		[.data.repository.pullRequest.reviewThreads.nodes[] |
+		 select(.isResolved == false) |
+		 select(.comments.nodes[0].author.login == "github-actions[bot]")] |
+		.[].id
+	' 2>/dev/null || echo "")
+
+	if [[ -z ${thread_ids} ]]; then
+		return 0
+	fi
+
+	# GraphQL mutation to resolve a single review thread
+	local resolve_mutation
+	resolve_mutation=$(
+		cat <<-'GRAPHQL'
+			mutation($threadId: ID!) {
+				resolveReviewThread(input: {threadId: $threadId}) {
+					thread { isResolved }
+				}
+			}
+		GRAPHQL
+	)
+
+	# Resolve each bot thread so conversations collapse in the PR UI
+	for thread_id in ${thread_ids}; do
+		if gh api graphql \
+			-f threadId="${thread_id}" \
+			-f query="${resolve_mutation}" >/dev/null 2>&1; then
+			print_information "Resolved review thread ${thread_id}"
+		else
+			print_information "Could not resolve thread ${thread_id}, continuing"
+		fi
+	done
+}
+
+# ---------------------------------------------------------------------------
+# Delete all review comments by github-actions[bot] on a pull request.
+# Removes stale line comments from previous review runs so that each new
+# review starts with a clean PR.
+# ---------------------------------------------------------------------------
+function delete_bot_comments {
+	local pr_number="$1"
+
+	# Fetch review comments on the PR
+	local comments
+	if ! comments=$(gh_api_with_retry "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}/comments?per_page=100"); then
+		print_information "Could not fetch review comments, skipping deletion"
+		return 0
+	fi
+
+	# Extract comment IDs from github-actions[bot]
+	local comment_ids
+	comment_ids=$(echo "${comments}" | jq --raw-output '
+		[.[] | select(.user.login == "github-actions[bot]")] | .[].id
+	' 2>/dev/null || echo "")
+
+	if [[ -z ${comment_ids} ]]; then
+		return 0
+	fi
+
+	# Delete each bot comment to remove stale line-level feedback
+	for comment_id in ${comment_ids}; do
+		if gh api --method DELETE \
+			"repos/${GITHUB_REPOSITORY}/pulls/comments/${comment_id}" >/dev/null 2>&1; then
+			print_information "Deleted review comment #${comment_id}"
+		else
+			print_information "Could not delete comment #${comment_id}, continuing"
+		fi
+	done
+}
+
+# ---------------------------------------------------------------------------
 # Dismiss previous automated reviews on a pull request. Fetches all reviews
 # by github-actions[bot] with CHANGES_REQUESTED state and dismisses them
 # so they do not block merging after a new review is posted.
@@ -789,8 +912,8 @@ function dismiss_old_reviews {
 # If posting with line comments fails (e.g. comments reference lines not
 # in the diff), falls back to a summary-only review.
 #
-# Before posting, dismisses any previous bot reviews so stale change
-# requests do not block the PR.
+# Before posting, cleans up previous bot reviews: resolves threads,
+# deletes line comments, and dismisses blocking reviews.
 # ---------------------------------------------------------------------------
 function process_results_github {
 	local comment_count="$1"
@@ -798,7 +921,10 @@ function process_results_github {
 	local summary_text="$3"
 	local all_comments="$4"
 
-	# Dismiss previous bot reviews before posting a new one
+	# Clean up previous bot reviews: resolve threads, delete comments,
+	# and dismiss blocking reviews before posting a new one
+	resolve_bot_threads "${GITHUB_PULL_REQUEST_NUMBER}"
+	delete_bot_comments "${GITHUB_PULL_REQUEST_NUMBER}"
 	dismiss_old_reviews "${GITHUB_PULL_REQUEST_NUMBER}"
 
 	# Determine the review event: only request changes for confirmed critical
@@ -1162,19 +1288,17 @@ ${diff_summary}"
 }
 
 # ---------------------------------------------------------------------------
-# Build the complete review summary. The walkthrough is generated by the
-# model from diff data; the changes table and issues sections are fully
-# programmatic to prevent hallucination in actionable content.
+# Build the core review summary. The walkthrough is generated by the
+# model from diff data; the issues section is fully programmatic to
+# prevent hallucination in actionable content.
 #
 # Sections:
 #   1. Walkthrough — model-generated prose summary of the changes
-#   2. Changes — table of files with status (from build_changes_table)
-#   3. Issues — grouped by severity from the validated review result
+#   2. Issues — grouped by severity from the validated review result
 # ---------------------------------------------------------------------------
 function generate_summary {
 	local validated_result="$1"
-	local changes_table="$2"
-	local pr_files_json="$3"
+	local pr_files_json="$2"
 
 	# Walkthrough section — model-generated prose summary
 	local walkthrough_text
@@ -1237,9 +1361,8 @@ ${info_items}"
 		fi
 	fi
 
-	# Assemble the complete summary
-	printf '%s\n\n## Changes\n\n%s\n\n%s' \
-		"${walkthrough}" "${changes_table}" "${issues_section}"
+	# Assemble the core summary (walkthrough + issues)
+	printf '%s\n\n%s' "${walkthrough}" "${issues_section}"
 }
 
 # ---------------------------------------------------------------------------
@@ -1386,7 +1509,7 @@ function main {
 	done
 
 	# Ensure the root directory is set
-	if [[ -z ${ROOT_DIRECTORY:-} ]]; then
+	if [[ -z ${ROOT_DIRECTORY} ]]; then
 		print_error "Error: ROOT_DIRECTORY is not set."
 		return 2
 	fi
@@ -1493,30 +1616,33 @@ function main {
 	local changes_table
 	changes_table=$(build_changes_table "${pr_files_json}")
 	local summary_text
-	summary_text=$(generate_summary "${validated_result}" "${changes_table}" "${pr_files_json}")
+	summary_text=$(generate_summary "${validated_result}" "${pr_files_json}")
 
-	# Append collapsible nitpicks section (info-severity issues only)
+	# Append Feedback section (nitpicks + agent prompt) if either exists
 	local nitpicks_section
 	nitpicks_section=$(build_nitpicks_section "${mapped_result}")
-	if [[ -n ${nitpicks_section} ]]; then
-		summary_text="${summary_text}${nitpicks_section}"
-	fi
-
-	# Append collapsible agent prompt section (all issues)
 	local agent_prompt_section
 	agent_prompt_section=$(build_agent_prompt_section "${mapped_result}")
-	if [[ -n ${agent_prompt_section} ]]; then
-		summary_text="${summary_text}${agent_prompt_section}"
+
+	if [[ -n ${nitpicks_section} || -n ${agent_prompt_section} ]]; then
+		summary_text="${summary_text}
+
+## Feedback"
+		if [[ -n ${nitpicks_section} ]]; then
+			summary_text="${summary_text}${nitpicks_section}"
+		fi
+		if [[ -n ${agent_prompt_section} ]]; then
+			summary_text="${summary_text}${agent_prompt_section}"
+		fi
 	fi
 
-	# Compute severity counts for metadata
+	# Append Metadata section (changes table + review statistics)
 	local critical_count error_count warning_count info_count
 	critical_count=$(echo "${mapped_result}" | jq '[.[]?.issues[]? | select(.severity == "critical")] | length' 2>/dev/null || echo "0")
 	error_count=$(echo "${mapped_result}" | jq '[.[]?.issues[]? | select(.severity == "error")] | length' 2>/dev/null || echo "0")
 	warning_count=$(echo "${mapped_result}" | jq '[.[]?.issues[]? | select(.severity == "warning")] | length' 2>/dev/null || echo "0")
 	info_count=$(echo "${mapped_result}" | jq '[.[]?.issues[]? | select(.severity == "info")] | length' 2>/dev/null || echo "0")
 
-	# Append collapsible review metadata section
 	local metadata_section
 	metadata_section=$(build_metadata_section \
 		"${loaded_count}" \
@@ -1528,7 +1654,18 @@ function main {
 		"${in_diff_count}" \
 		"${validated_issue_count}" \
 		"${batch_issue_count}")
-	summary_text="${summary_text}${metadata_section}"
+
+	summary_text="${summary_text}
+
+## Metadata
+
+<details>
+<summary>Changes</summary>
+
+${changes_table}
+
+</details>
+${metadata_section}"
 
 	# Step 6: Submit the review with line comments and summary
 	submit_review "${comment_count}" "${has_critical}" "${summary_text}" "${all_comments}"
