@@ -31,7 +31,7 @@
   filing or triaging issues.
 - `.github/CODEOWNERS` — Code ownership definitions. Consult this to understand
   review responsibilities.
-- `.github/DEPENDABOT.yml` — Dependency update configuration.
+- `.github/dependabot.yml` — Dependency update configuration.
 - `.github/SECURITY.md` — Security policy and vulnerability reporting process.
   Follow this when handling security-related changes.
 - `LICENSE` — Project licence. Do not modify.

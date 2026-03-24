@@ -1,0 +1,47 @@
+name: Auto-Assign PR Creator
+
+on:
+  pull_request:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "The PR number to assign"
+        required: true
+        type: number
+
+concurrency:
+  group:
+    ${{ github.workflow }}-${{ inputs.pr_number ||
+    github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  pull-requests: write
+
+jobs:
+  auto-assign:
+    name: Auto-Assign PR Creator
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assign PR to creator
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER="${{ inputs.pr_number || github.event.pull_request.number }}"
+
+          # Get PR details
+          PR_DATA=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json assignees,author --jq '{assignees: [.assignees[].login], author: .author.login}')
+          CREATOR=$(echo "$PR_DATA" | jq -r '.author')
+          ASSIGNEES=$(echo "$PR_DATA" | jq -r '.assignees | length')
+
+          # Skip if an assignee is already set
+          if [ "$ASSIGNEES" -gt 0 ]; then
+            echo "PR #$PR_NUMBER already has assignee(s), skipping"
+            exit 0
+          fi
+
+          echo "Assigning PR #$PR_NUMBER to creator: $CREATOR"
+
+          # Assign the PR to the creator
+          gh pr edit "$PR_NUMBER" --repo "${{ github.repository }}" --add-assignee "$CREATOR" || echo "Assignment failed or user cannot be assigned"
