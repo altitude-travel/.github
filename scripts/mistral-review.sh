@@ -27,14 +27,15 @@ readonly MAX_BATCH_CONTENT_BYTES=1000000
 # Mistral API endpoint and model for code review
 readonly MISTRAL_API_URL="https://api.mistral.ai/v1/chat/completions"
 readonly MISTRAL_MODEL="devstral-latest"
-readonly REVIEW_PREAMBLE="You are a code reviewer. Find REAL bugs and security vulnerabilities ONLY.
+readonly REVIEW_PREAMBLE="You are a code reviewer. Find REAL bugs, security vulnerabilities, and violations of project conventions.
 
 RULES:
 1. Your training data is outdated. NEVER flag version numbers, package versions, action versions, API names, CLI flags, or language syntax as wrong — they may be newer than your knowledge. If you do not recognise a syntax construct or API, assume it is valid.
 2. ONLY report issues with clear evidence IN THE CODE. If you are not 100% certain, do NOT report it. Read the code carefully before claiming something is missing or incorrect — re-read the exact lines to confirm.
 3. For each issue you MUST include a code_snippet field containing the EXACT code from the file that proves the issue. Copy-paste the problematic code verbatim. If you cannot quote the exact code, the issue is not real — do NOT report it.
 4. Environment variable references, secret manager lookups, shell variable interpolation, and GitHub Actions secrets references are NOT hardcoded secrets — they are the correct way to handle credentials. Fallback defaults for non-sensitive config are NOT security issues. Development credentials in docker-compose.dev.yml are NOT critical. Public keys, public certificates, and public key fingerprints are PUBLIC by design and are NOT secrets — only flag a key if you are certain it is a PRIVATE key.
-5. Do NOT report: style preferences, missing features that ARE present in the code, portability concerns for CI-only scripts, speculative scenarios, or over-engineered suggestions. Do NOT report error handling as incomplete when typed throws or exhaustive pattern matching is used — the type system guarantees completeness."
+5. Do NOT report: style preferences, missing features that ARE present in the code, portability concerns for CI-only scripts, speculative scenarios, or over-engineered suggestions. Do NOT report error handling as incomplete when typed throws or exhaustive pattern matching is used — the type system guarantees completeness.
+6. When PROJECT CONVENTIONS are provided below, ENFORCE them. Flag code that violates those conventions (e.g. wrong spelling variant, wrong naming pattern, wrong file structure). Do NOT invent conventions — only enforce rules explicitly stated in the PROJECT CONVENTIONS section."
 
 # ---------------------------------------------------------------------------
 # Logging helpers — consistent prefixed output for information and errors.
@@ -90,7 +91,7 @@ function gh_api_with_retry {
 	local attempt=0
 
 	while [[ ${attempt} -lt ${max_retries} ]]; do
-		if gh api "$@" 2>/dev/null; then
+		if gh api "$@"; then
 			return 0
 		fi
 
@@ -822,9 +823,9 @@ function resolve_bot_threads {
 
 	# Resolve each bot thread so conversations collapse in the PR UI
 	for thread_id in ${thread_ids}; do
-		if gh api graphql \
+		if gh_api_with_retry graphql \
 			-f threadId="${thread_id}" \
-			-f query="${resolve_mutation}" >/dev/null 2>&1; then
+			-f query="${resolve_mutation}" >/dev/null; then
 			print_information "Resolved review thread ${thread_id}"
 		else
 			print_information "Could not resolve thread ${thread_id}, continuing"
@@ -842,7 +843,7 @@ function delete_bot_comments {
 
 	# Fetch review comments on the PR
 	local comments
-	if ! comments=$(gh_api_with_retry "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}/comments?per_page=100"); then
+	if ! comments=$(gh_api_with_retry --paginate "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}/comments?per_page=100"); then
 		print_information "Could not fetch review comments, skipping deletion"
 		return 0
 	fi
@@ -859,8 +860,8 @@ function delete_bot_comments {
 
 	# Delete each bot comment to remove stale line-level feedback
 	for comment_id in ${comment_ids}; do
-		if gh api --method DELETE \
-			"repos/${GITHUB_REPOSITORY}/pulls/comments/${comment_id}" >/dev/null 2>&1; then
+		if gh_api_with_retry --method DELETE \
+			"repos/${GITHUB_REPOSITORY}/pulls/comments/${comment_id}" >/dev/null; then
 			print_information "Deleted review comment #${comment_id}"
 		else
 			print_information "Could not delete comment #${comment_id}, continuing"
@@ -878,7 +879,7 @@ function dismiss_old_reviews {
 
 	# Fetch all reviews on the PR
 	local reviews
-	if ! reviews=$(gh_api_with_retry "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}/reviews"); then
+	if ! reviews=$(gh_api_with_retry --paginate "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}/reviews?per_page=100"); then
 		print_information "Could not fetch existing reviews, skipping dismissal"
 		return 0
 	fi
@@ -892,9 +893,9 @@ function dismiss_old_reviews {
 
 	# Dismiss each stale review so it no longer blocks the PR
 	for review_id in ${review_ids}; do
-		if gh api --method PUT \
+		if gh_api_with_retry --method PUT \
 			"repos/${GITHUB_REPOSITORY}/pulls/${pr_number}/reviews/${review_id}/dismissals" \
-			--field message="Superseded by new automated review" >/dev/null 2>&1; then
+			--field message="Superseded by new automated review" >/dev/null; then
 			print_information "Dismissed old review #${review_id}"
 		else
 			print_information "Could not dismiss review #${review_id}, continuing"
@@ -945,22 +946,27 @@ function process_results_github {
 		head_sha=$(gh_api_with_retry "repos/${GITHUB_REPOSITORY}/pulls/${GITHUB_PULL_REQUEST_NUMBER}" | jq --raw-output '.head.sha' 2>/dev/null || echo "")
 
 		if [[ -n ${head_sha} ]]; then
-			# Build the review payload with line comments and summary
-			local payload
-			payload=$(jq --null-input \
+			# Build the review payload with line comments and summary.
+			# Written to a temp file so gh_api_with_retry can re-read it
+			# on each retry attempt (piped stdin is consumed on first try).
+			local payload_file
+			payload_file=$(mktemp)
+			jq --null-input \
 				--arg body "${summary_text}" \
 				--arg event "${event}" \
 				--arg sha "${head_sha}" \
 				--argjson comments "${all_comments}" \
-				'{commit_id: $sha, body: $body, event: $event, comments: $comments}')
+				'{commit_id: $sha, body: $body, event: $event, comments: $comments}' >"${payload_file}"
 
 			# Post the review; if it succeeds we are done
-			if echo "${payload}" | gh api --method POST \
+			if gh_api_with_retry --method POST \
 				"repos/${GITHUB_REPOSITORY}/pulls/${GITHUB_PULL_REQUEST_NUMBER}/reviews" \
-				--input - >/dev/null 2>&1; then
+				--input "${payload_file}" >/dev/null; then
+				rm --force "${payload_file}"
 				print_information "Posted review with comments to PR #${GITHUB_PULL_REQUEST_NUMBER}"
 				return 0
 			fi
+			rm --force "${payload_file}"
 
 			# Line comments may reference lines outside the diff — fall back
 			print_information "Failed to post review with line comments, posting summary only"
@@ -1055,10 +1061,10 @@ function build_review_prompt {
 	local agents_section=""
 	if [[ -n ${agents_md_content} ]]; then
 		agents_section="
-PROJECT CONVENTIONS (from the repository's AGENTS.md — you MUST respect these):
+PROJECT CONVENTIONS (from the repository's AGENTS.md — you MUST enforce these):
 ${agents_md_content}
 
-When reviewing code, respect these project-specific conventions and rules. Do NOT flag code that follows these conventions as an issue.
+When reviewing code, ENFORCE these project-specific conventions. Flag code that VIOLATES these conventions as an issue with category \"Convention\". Do NOT flag code that follows these conventions as an issue.
 
 "
 	fi
@@ -1092,7 +1098,7 @@ OUTPUT DATA STRUCTURE (JSON object):
           \"message\": \"clear description of the actual issue\",
           \"severity\": \"info|warning|error|critical\",
           \"code_snippet\": \"the exact code from the file that proves this issue — copy-paste verbatim\",
-          \"category\": \"Bug|Security|Performance|Refactor|Style|Documentation\"
+          \"category\": \"Bug|Security|Performance|Refactor|Style|Documentation|Convention\"
         }
       ]
     }
