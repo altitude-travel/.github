@@ -3,18 +3,13 @@ updates:
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
+      interval: "monthly"
+    open-pull-requests-limit: 1
     labels:
       - "npm"
       - "dependencies"
     groups:
-      production-dependencies:
-        dependency-type: "production"
-        patterns:
-          - "*"
-      development-dependencies:
-        dependency-type: "development"
+      all-dependencies:
         patterns:
           - "*"
     commit-message:
@@ -24,13 +19,13 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
+      interval: "monthly"
+    open-pull-requests-limit: 1
     labels:
       - "github-actions"
       - "dependencies"
     groups:
-      github-actions:
+      all-actions:
         patterns:
           - "*"
     commit-message:
@@ -40,13 +35,13 @@ updates:
   - package-ecosystem: "terraform"
     directory: "/"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
+      interval: "monthly"
+    open-pull-requests-limit: 1
     labels:
       - "terraform"
       - "dependencies"
     groups:
-      terraform-providers:
+      all-providers:
         patterns:
           - "*"
     commit-message:
@@ -56,13 +51,13 @@ updates:
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
+      interval: "monthly"
+    open-pull-requests-limit: 1
     labels:
       - "docker"
       - "dependencies"
     groups:
-      docker-images:
+      all-images:
         patterns:
           - "*"
     commit-message:
@@ -72,13 +67,13 @@ updates:
   - package-ecosystem: "swift"
     directory: "/"
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
+      interval: "monthly"
+    open-pull-requests-limit: 1
     labels:
       - "swift"
       - "dependencies"
     groups:
-      swift-packages:
+      all-packages:
         patterns:
           - "*"
     commit-message:
