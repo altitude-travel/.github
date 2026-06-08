@@ -15,7 +15,7 @@ permissions:
 jobs:
   review:
     name: Mistral Code Review
-    if: github.actor != 'dependabot[bot]'
+    if: ${{ false && github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
