@@ -1,3 +1,9 @@
+<!--
+  This file is centrally managed by the altitude-travel/github-policies
+  repository and will be overwritten on every policy sync. Do not edit it
+  here — propose changes in github-policies instead.
+-->
+
 ## Related Issue
 
 <!-- Please link to the issue this PR resolves -->

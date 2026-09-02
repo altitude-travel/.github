@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# This file is centrally managed by the altitude-travel/github-policies
+# repository and will be overwritten on every policy sync. Do not edit it
+# here — propose changes in github-policies instead.
+
 # Strict mode: exit on error, undefined variables, and pipe failures.
 # This line must never be removed.
 set -euo pipefail

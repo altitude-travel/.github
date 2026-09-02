@@ -1,3 +1,9 @@
+<!--
+  This file is centrally managed by the altitude-travel/github-policies
+  repository and will be overwritten on every policy sync. Do not edit it
+  here — propose changes in github-policies instead.
+-->
+
 # Claude Agent Configuration
 
 This file is the entry point for Claude Code. It is intentionally short — it
