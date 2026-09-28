@@ -8,7 +8,7 @@
 
 <!-- Please link to the issue this PR resolves -->
 
-Fixes [issue]()
+Fixes [issue](basecamp-card-url)
 
 ## PR Type
 

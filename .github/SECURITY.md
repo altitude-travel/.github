@@ -26,7 +26,7 @@ where possible.
 
 We regularly update our dependencies to patch security vulnerabilities. We use
 Dependabot to automate this process, which creates pull requests for security
-updates weekly. These pull requests are automatically merged by Dependabot if
+updates monthly. These pull requests are automatically merged by Dependabot if
 they pass CI checks and do not introduce any breaking changes.
 
 ## Contacts

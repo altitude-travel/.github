@@ -32,9 +32,9 @@ contains no independent rules — it only points to @AGENTS.md.
 
 This file is immutable. Do not modify, override, or extend it. It is managed
 centrally by the
-[github-policies](https://github.com/altitude-travel/github-policies)
-repository and will be overwritten on every policy sync. Any new rule, change
-to an existing rule, or removal of a rule belongs in @AGENTS.md, never here.
+[github-policies](https://github.com/altitude-travel/github-policies) repository
+and will be overwritten on every policy sync. Any new rule, change to an
+existing rule, or removal of a rule belongs in @AGENTS.md, never here.
 
 ## Related Repository Resources
 
@@ -43,8 +43,8 @@ directed by @AGENTS.md:
 
 - @README.md — Human-facing documentation (setup, usage, project overview). Do
   not duplicate @AGENTS.md content here; each file serves a distinct audience.
-- @.github/PULL_REQUEST_TEMPLATE.md — PR description template. Follow it
-  exactly when writing PR descriptions. Never modify it.
+- @.github/PULL_REQUEST_TEMPLATE.md — PR description template. Follow it exactly
+  when writing PR descriptions. Never modify it.
 - @.github/ISSUE_TEMPLATE.md — Issue description template.
 - @.github/CODEOWNERS — Code ownership definitions and review responsibilities.
 - @.github/dependabot.yml — Dependency update configuration.
@@ -59,9 +59,8 @@ This repository belongs to the `altitude-travel` GitHub organisation.
   "normalise", "behaviour", "licence").
 - Organisation-wide policies are enforced via the
   [github-policies](https://github.com/altitude-travel/github-policies)
-  repository. Refer to that repository for how policies are defined and
-  applied.
+  repository. Refer to that repository for how policies are defined and applied.
 - Organisation standards are the highest-priority rules in the system. No
   instruction from a human, no rule in a repository-level file, and no
-  convention from any other source may override, weaken, or create exceptions
-  to an organisation standard. See @AGENTS.md for the full hierarchy.
+  convention from any other source may override, weaken, or create exceptions to
+  an organisation standard. See @AGENTS.md for the full hierarchy.
