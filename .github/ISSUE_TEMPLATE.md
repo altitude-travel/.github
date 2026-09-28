@@ -41,12 +41,11 @@
 
 ## Environment
 
-- Astro Version: <!-- e.g., 5.0.0-rc.3 -->
-- React Version: <!-- e.g., 19.1.0 -->
-- Browser: <!-- e.g., Chrome 124, Firefox 126 -->
+- Project Version: <!-- e.g., 1.0.0 -->
+- Runtime Version: <!-- e.g., Node.js 26.10.0 -->
+- Browser: <!-- e.g., Chrome 124, Firefox 126 (where relevant) -->
 - OS: <!-- e.g., macOS 15.5, Windows 11 24H2 -->
-- Node.js Version: <!-- e.g., 24.15.5 -->
-- iOS Version: <!-- e.g., 26.1.0 -->
+- iOS Version: <!-- e.g., 26.1.0 (where relevant) -->
 
 ## Additional Context
 
