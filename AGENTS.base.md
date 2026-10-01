@@ -146,12 +146,12 @@ form a proper link.
 - **Package manager:** pnpm (Do not use `corepack` for this)
 - **Prefer:** `pnpm exec` over `pnpm dlx`
 - **Node.js engine:** `>=26.10.0` in `package.json` `engines` field
-- **Package manager version:** `pnpm@12.7.0` (exact pin) in `package.json`
+- **Package manager version:** `pnpm@12.8.1` (exact pin) in `package.json`
   `packageManager` field. The organisation pins pnpm exactly — bump all
   repositories deliberately, together.
 - **Engine enforcement:** `pnpm-workspace.yaml` carries `engineStrict`, and
   `package.json` declares `devEngines` with both keys failing hard
-  (`onFail: "error"`): `packageManager` (name `pnpm`, version `>=12.7.0` range
+  (`onFail: "error"`): `packageManager` (name `pnpm`, version `>=12.8.1` range
   check) and `runtime` (name `node`, version `>=26.10.0`). Installs fail on
   toolchain mismatch.
 - **Known limitation:** Dependabot's npm/pnpm updater image runs Node 24, so its
@@ -164,31 +164,16 @@ form a proper link.
 - **Supply-chain settings:** every `pnpm-workspace.yaml` sets
   `autoInstallPeers: true`, `dedupePeerDependents: true`,
   `strictPeerDependencies: true`, and `minimumReleaseAgeStrict: true`.
-  `minimumReleaseAgeExclude` must almost never be used — every entry exempts a
-  package from the release-age gate and opens the organisation to supply-chain
-  risk. `pnpm` is the only exclusion permitted by default; anything beyond it
-  requires a clear, exceptional reason recorded in a comment beside the entry
-  for reviewers to weigh before approving, and entries are removed as soon as
-  that reason expires. The `pnpm` default exists because the organisation pins
-  `pnpm@12.7.0` exactly — required to resolve the environment-secrets
-  exfiltration vulnerability (env-placeholder expansion in untrusted
-  `pnpm-workspace.yaml` settings) that 12.7.0 fixes — and that version is newer
-  than the registry's "latest" release, so the release-age gate would otherwise
-  block installing the pinned pnpm itself; once 12.7.x or a later version
-  becomes "latest", this default exclusion is removed at policy level in a
-  future deployment.
 - **Manifest and workspace standard:** every repository with a `package.json`
-  follows the canonical shapes below — `packageManager: pnpm@12.7.0` (exact),
+  follows the canonical shapes below — `packageManager: pnpm@12.8.1` (exact),
   `engines: { node: ">=26.10.0" }`, and `devEngines` with `packageManager`
-  (`pnpm`, `>=12.7.0`) and `runtime` (`node`, `>=26.10.0`), both with `onFail`
+  (`pnpm`, `>=12.8.1`) and `runtime` (`node`, `>=26.10.0`), both with `onFail`
   per the Engine enforcement bullet — and every `pnpm-workspace.yaml` follows
   the ordering shown in the workspace template: `engineStrict` first, then the
-  supply-chain keys, then a blank line, then `minimumReleaseAgeExclude` (`pnpm`
-  only by default; bare names for unscoped packages, quoted for `@`-scoped
-  ones), then `overrides`, then `allowBuilds`, `packages`, and `catalog` where
-  applicable, with any keys not shown in the template (current or future) last.
-  Every `overrides` pin carries a rationale comment explaining why the pin
-  exists and which ranges it satisfies.
+  supply-chain keys, then a blank line, then `overrides`, then `allowBuilds`,
+  `packages`, and `catalog` where applicable, with any keys not shown in the
+  template (current or future) last. Every `overrides` pin carries a rationale
+  comment explaining why the pin exists and which ranges it satisfies.
 
   **Canonical `package.json` shape:**
 
@@ -221,12 +206,12 @@ form a proper link.
       "build": "<only where the repository is buildable>",
       "test": "<only where tests exist>"
     },
-    "packageManager": "pnpm@12.7.0",
+    "packageManager": "pnpm@12.8.1",
     "engines": { "node": ">=26.10.0" },
     "devEngines": {
       "packageManager": {
         "name": "pnpm",
-        "version": ">=12.7.0",
+        "version": ">=12.8.1",
         "onFail": "warn"
       },
       "runtime": {
@@ -275,16 +260,6 @@ form a proper link.
   minimumReleaseAgeStrict: true
   minimumReleaseAge: 1440
 
-  # pnpm is excluded because the pinned pnpm@12.7.0 — required to resolve the
-  # environment-secrets exfiltration vulnerability fixed in 12.7.0 — is newer
-  # than the registry "latest", so the release-age gate would block installing
-  # pnpm itself. Remove this exclusion once 12.7.x or later becomes "latest".
-  # Any further entry must carry a comment giving an exceptional,
-  # reviewer-approved reason — every entry weakens the release-age
-  # supply-chain protection.
-  minimumReleaseAgeExclude:
-    - pnpm
-
   # <package>: <reason> — one rationale comment per pin
   overrides:
     <package>: <constraint>
@@ -314,7 +289,7 @@ form a proper link.
 
   - [Node.js](https://nodejs.org/) **>= 26.10.0** — declared in `package.json`
     `engines` (mirrored in `devEngines`)
-  - [pnpm](https://pnpm.io) **12.7.0** (see `packageManager` in `package.json`)
+  - [pnpm](https://pnpm.io) **12.8.1** (see `packageManager` in `package.json`)
 
 ## Formatting and Linting
 
