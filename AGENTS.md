@@ -120,8 +120,8 @@ community members. Keep language accessible and avoid unnecessary jargon.
 ## Formatting and Linting
 
 The organisation standard scripts format and lint the whole codebase; Prettier
-covers the Markdown prose (the deployed `.prettierignore` keeps every
-Biome-covered file type out of its reach):
+covers the prose file types, and the standard keeps the two formatters' reach
+separate so they never disagree on a file:
 
 - **Format**: `pnpm format` (runs `bash ./scripts/format.sh`)
 - **Lint**: `pnpm lint` (runs `bash ./scripts/lint.sh`)
