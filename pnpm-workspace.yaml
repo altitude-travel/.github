@@ -1,0 +1,11 @@
+# Temporary: engineStrict and the devEngines onFail values are warn-level
+# because Dependabot's npm/pnpm updater image runs Node 24, which would trip
+# strict gates. Flip back to engineStrict: true and onFail: "error" once
+# Dependabot's updater ships Node 26.
+
+engineStrict: false
+autoInstallPeers: true
+dedupePeerDependents: true
+strictPeerDependencies: true
+minimumReleaseAgeStrict: true
+minimumReleaseAge: 1440
