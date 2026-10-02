@@ -1,0 +1,45 @@
+{
+  "name": "@altitude-travel/github",
+  "version": "1.0.0",
+  "description": "Organisation-level GitHub profile and repository configuration.",
+  "keywords": [
+    "github",
+    "organisation",
+    "configuration"
+  ],
+  "license": "PROPRIETARY",
+  "private": false,
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/altitude-travel/.github.git"
+  },
+  "bugs": {
+    "url": "https://github.com/altitude-travel/.github/issues"
+  },
+  "homepage": "https://github.com/altitude-travel/.github#readme",
+  "scripts": {
+    "format": "bash ./scripts/format.sh",
+    "lint": "bash ./scripts/lint.sh"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.14",
+    "prettier": "^3.9.9"
+  },
+  "packageManager": "pnpm@12.8.1",
+  "engines": {
+    "node": ">=26.10.0"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": ">=12.8.1",
+      "onFail": "warn"
+    },
+    "runtime": {
+      "name": "node",
+      "version": ">=26.10.0",
+      "onFail": "warn"
+    }
+  }
+}

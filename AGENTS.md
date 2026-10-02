@@ -119,10 +119,13 @@ community members. Keep language accessible and avoid unnecessary jargon.
 
 ## Formatting and Linting
 
-This repository contains only Markdown files. Use Prettier for formatting:
+The organisation standard scripts format and lint the whole codebase; Prettier
+covers the prose file types, and the standard keeps the two formatters' reach
+separate so they never disagree on a file:
 
-- **Check**: `npx prettier . --prose-wrap always --check`
-- **Format**: `npx prettier . --prose-wrap always --write`
+- **Format**: `pnpm format` (runs `bash ./scripts/format.sh`)
+- **Lint**: `pnpm lint` (runs `bash ./scripts/lint.sh`)
 
-The `--prose-wrap always` flag is the organisation-wide convention. Always run
-the format command and verify with the check command before submitting changes.
+Always run the format command and verify with the lint command before submitting
+changes. shfmt and shellcheck are the system-level tools the scripts expect on
+PATH.

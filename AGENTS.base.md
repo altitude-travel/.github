@@ -49,19 +49,121 @@ All shell scripts follow this structure:
 
 - **Shebang:** `#!/usr/bin/env bash`
 - **Strict mode:** `set -euo pipefail`
-- **Indentation:** Tabs (not spaces)
+- **Indentation:** 2 spaces (`shfmt -i 2`); note `shfmt -i 0` means tabs
+- **Local declarations:** one `local` per line, never combined (`local a b`)
 - **Constants:** `SCRIPT_DIRECTORY` and `ROOT_DIRECTORY` as separate `readonly`
   declarations
 - **Function syntax:** `function name {` (not `name() {`)
 - **Logging:** `print_error` (stderr) and `print_information` (stdout) using
   `printf "[ERROR]: %s\n"` and `printf "[INFO]: %s\n"` respectively
+- **Documentation:** Every script documents with
+  [shdoc](https://github.com/reconquest/shdoc) syntax; agents must read the
+  documentation to apply the proper tags, in the standard order: description,
+  `@see`/`@internal`, `@arg` lines together, `@example`, `@stdout`/`@stderr`
+  paired, `@exitcode`s grouped; every sourced file is guarded by an `if` block
+  testing it, and shellcheck suppression directives never appear in source
 - **Usage:** Every script includes `print_usage` with `-h`/`--help` support
 - **Dependency checks:** `command_exists` function for non-system tools
 - **File checks:** `file_exists` function for file existence
-- **Pure functions:** Functions take arguments — they do not reach for globals
+- **Pure functions:** Functions take arguments — they do not reach for globals;
+  helper functions may adjust shell options internally but restore the caller's
+  state before returning
+- **No `else` clauses:** the standard applies to every language in every
+  repository (shell, TypeScript, Swift, anything): `else`/`elif` branches are
+  not used. A condition's negative outcome is a **guard** — it terminates the
+  flow (`continue` inside loops, `return` inside functions, early `exit` in
+  scripts) and the happy path falls through:
+
+  ```bash
+  if [ ! -f "$CONFIG" ]; then
+    print_error "Config not found: $CONFIG"
+    return 1
+  fi
+
+  load_config "$CONFIG"
+  ```
+
+  ```typescript
+  if (!configExists) {
+    throw new Error(`Config not found: ${path}`);
+  }
+
+  loadConfig(config);
+  ```
+
+  When a check's _outcome_ is data — an error status to report, a fallback
+  value, a skipped optional step — the state is captured by an explicit
+  statement, then a guard acts on the captured state; short-circuit operators
+  (`||`, `&&`, `?:`) never handle error flow or carry side effects as their
+  alternative branch:
+
+  ```bash
+  local ignore_status=0
+
+  git check-ignore -q "$resolved" 2>/dev/null || ignore_status="$?"
+
+  if [ "$ignore_status" -eq 0 ]; then
+    continue
+  fi
+
+  if [ "$ignore_status" -gt 1 ]; then
+    print_error "Cannot determine the gitignore status, skipping: $script"
+    continue
+  fi
+  ```
+
+  The one sanctioned `else` is a **defensive failure guard** whose error branch
+  exits outright — nothing can continue without it, so no happy path exists to
+  fall through:
+
+  ```bash
+  if [ -s "$SCRIPT_DIRECTORY/common.sh" ]; then
+    source "$SCRIPT_DIRECTORY/common.sh"
+  else
+    print_error "The shared helper module is missing: $SCRIPT_DIRECTORY/common.sh"
+    exit 1
+  fi
+  ```
+
+- **No short-circuit error handling:** `|| fallback` and `&& guard` chains never
+  stand in for an `if`: control flow belongs to explicit condition statements,
+  short-circuiting belongs to pure value expressions only — assigning a captured
+  exit status (`command || status="$?"`) is such a pure value assignment, not
+  flow handling.
+- **Comments:** comments in source code are an **exception, not a rule**. Doc
+  blocks are the expectation on every function, in the language's standard form
+  — [shdoc](https://github.com/reconquest/shdoc) for shell,
+  [JSDoc](https://jsdoc.app/) for JavaScript/TypeScript,
+  [phpDocumentor](https://docs.phpdoc.org/) for PHP, and Google's
+  [docstring style](https://google.github.io/styleguide/pyguide.html#38-comments-and-docstrings)
+  for Python. A function without a doc block is remedied in the same change
+  (clean as you go, per Documentation Maintenance). Inline comments exist only
+  where a specific line would otherwise be misleading — a fork between two
+  tools' interfaces (GNU date versus BSD date), a token's scope limitation, a
+  caller's contract. A comment is absent whenever one of these holds: the
+  statement below it already carries the same information in its own tokens or
+  its error/log output, the comment would restate nearby documentation, or it
+  narrates mechanics (a loop iterating, a variable being assigned) instead of
+  explaining why the code is what it is.
+- **Quoting:** Variables and command substitutions are always quoted when they
+  expand into arguments; file lists captured from helpers are expanded through
+  arrays (via `mapfile -t` and `"${files[@]}"`), never through re-splitting a
+  string
 - **Entry point:** `main "$@"` followed by `exit 0`
 - **Argument handling:** Unknown flags error with `print_error` and
   `print_usage`; non-flag arguments break out of the parsing loop
+- **ShellCheck:** All scripts pass
+  `shellcheck -x --source-path="$HOME" --severity=warning --shell=bash` —
+  findings fail the gate; suppression directives (`# shellcheck source=`) never
+  appear in source; a `# shellcheck disable=SC1091` on an internal `common.sh`
+  source line is the only tolerated pattern, and source paths outside a
+  repository must be guarded
+- **Formatting:** `shfmt -i 2 -l -w -s` for writing, `shfmt -i 2 -s -d` for
+  checking
+- **Minimum bash:** 5.x — the maintained major; the constructs this standard
+  mandates (arrays, mapfile, globstar) assume it
+- **Shared helpers:** Scripts source the org-level `common.sh` for logging,
+  command checks, and shell-script discovery rather than redefining them
 
 The canonical outline (section order matters — helpers before `main`, no logic
 outside functions):
@@ -77,49 +179,55 @@ ROOT_DIRECTORY="$(dirname "$SCRIPT_DIRECTORY")"
 readonly ROOT_DIRECTORY
 
 function print_error {
-	printf "[ERROR]: %s\n" "$1" >&2
+  printf "[ERROR]: %s\n" "$1" >&2
 }
 
 function print_information {
-	printf "[INFO]: %s\n" "$1" >&1
+  printf "[INFO]: %s\n" "$1" >&1
 }
 
 function print_usage {
-	printf "Usage: %s [OPTIONS]\n" "$0"
-	printf "\n"
-	printf "One-sentence description of what the script does.\n"
-	printf "\n"
-	printf "Options:\n"
-	printf "  -h, --help    Show this help message and exit\n"
+  printf "Usage: %s [OPTIONS]\n" "$0"
+  printf "\n"
+  printf "One-sentence description of what the script does.\n"
+  printf "\n"
+  printf "Options:\n"
+  printf "  -h, --help    Show this help message and exit\n"
 }
 
 function command_exists {
-	command -v "$1" &>/dev/null
+  command -v "$1" &>/dev/null
 }
 
 function file_exists {
-	[[ -f "$1" ]]
+  [[ -f "$1" ]]
 }
 
 # Task-specific pure functions take arguments and return values —
 # they do not reach for globals or print inside computation logic.
 
 function main {
-	while [[ $# -gt 0 ]]; do
-		case "$1" in
-		-h | --help)
-			print_usage
-			exit 0
-			;;
-		*)
-			print_error "Invalid option: $1"
-			print_usage
-			exit 1
-			;;
-		esac
-	done
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+    -h | --help)
+      print_usage
+      exit 0
+      ;;
+    *)
+      print_error "Invalid option: $1"
+      print_usage
+      exit 1
+      ;;
+    esac
+  done
 
-	# validation (dependency/file checks), then the work
+  # Root guard — the entry point validates its operating directory first.
+  if [ -z "$ROOT_DIRECTORY" ]; then
+    print_error "ROOT_DIRECTORY is not set."
+    exit 2
+  fi
+
+  # validation (dependency/file checks), then the work
 }
 
 main "$@"
@@ -293,27 +401,41 @@ form a proper link.
 
 ## Formatting and Linting
 
-- **Biome:** Single tool for formatting and linting TypeScript, JavaScript, JSX,
-  TSX, JSON, and CSS. One tool per category — no ESLint. Biome handles both.
-  Biome runs against the entire project — exclusions for generated files, build
-  output, and dependencies go in `biome.json`'s `files.ignore`. Keep
-  `biome.json` ignore patterns in sync just like `.gitignore`, `.dockerignore`,
-  documentation, and other configuration files.
-- **Prettier:** Solely because Biome does not format Markdown, Prettier
-  (`--prose-wrap always`) runs before Biome in both `format.sh` and `lint.sh` so
-  that Markdown and other files Biome does not support meet the expected
-  standard, with Biome correcting from there where the two tools overlap. Biome
-  remains the single formatter for every file type it supports — Prettier must
-  never be introduced for a file type Biome handles. Machine-generated files
-  (e.g. `pnpm-lock.yaml`) are excluded via CLI ignore globs; a `.prettierignore`
-  is a last resort.
-- **shfmt:** `shfmt -i 0 -l -w -s` for formatting, `shfmt -i 0 -d -s` for
-  checking
-- **ShellCheck:** `shellcheck -S warning` on all shell scripts
-- **Repo-specific linters** (SwiftFormat, terraform fmt, etc.) are used
-  alongside the above for languages Biome does not cover
+- **Order:** Prettier first (Markdown and the file types Biome does not
+  support), Biome second and final authority for every file type it supports,
+  then the ecosystem-specific formatters, then shfmt and ShellCheck for shell
+  scripts
+- **Prettier:**
+  `pnpm exec prettier --prose-wrap always --write . '!pnpm-lock.yaml'` for
+  formatting and `--check` for linting; runs in every repository (the
+  devDependency is part of the standard manifest); the lockfile glob excludes
+  the machine-generated `pnpm-lock.yaml`
+- **Biome:** the format step is `pnpm exec biome check --write .` (formatting
+  plus safe lint fixes); the lint step is `pnpm exec biome check .`; the GitHub
+  PR annotations reporter activates automatically when `CI=true`. Biome runs
+  against the whole project — exclusions for generated files, build output, and
+  dependencies go into `biome.json` (which honours `.gitignore` via
+  `vcs.useIgnoreFile`); keep those patterns in sync just like `.gitignore`,
+  `.dockerignore`, and documentation
+- **Swift (when `Package.swift` exists):** format step runs `swiftformat .`;
+  lint step runs `swiftformat . --lint` and, on macOS only, SwiftLint
+  (`--strict`, GitHub reporter in CI); the local `.swiftformat` and
+  `.swiftlint.yml` configs stay repository-owned
+- **Terraform (when `*.tf` files exist):** format step runs
+  `terraform fmt -recursive`; lint step runs `terraform fmt -check -recursive`
+  and then `terraform init -backend=false -upgrade -input=false` +
+  `terraform validate`
+- **Shell scripts:** files are discovered by the `common.sh`
+  `list_shell_scripts` helper (whole tree, gitignored paths excluded,
+  uncommitted files included); format step runs `shfmt -i 2 -w -s`, lint step
+  runs `shfmt -i 2 -s -d` and `shellcheck -x` over that list
+- **Scripts are policy-managed:** `scripts/format.sh`, `scripts/lint.sh`, and
+  `scripts/common.sh` are deployed by the `github-policies` repository and
+  overwritten on every policy sync — propose changes there, never in a
+  repository
+
 - **Biome `useImportType` rule:** Disabled (`"off"`) in `biome.json`. Biome's
-  default `recommended` ruleset promotes value imports to `import type`, which
+  default recommended ruleset promotes value imports to `import type`, which
   erases class tokens at compile time and breaks NestJS dependency injection at
   runtime. This rule must remain off in all repositories.
 - **`biome.base.json` is policy-managed:** This file is deployed by the

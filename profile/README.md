@@ -6,8 +6,8 @@
 
 Altitude is an AI-powered travel planning and booking platform built by Altitude
 Travel Ltd. Our mission is to make every journey effortless, trustworthy, and
-socially connected. We envision a world where travel planning is as easy and enjoyable as
-the trip itself.
+socially connected. We envision a world where travel planning is as easy and
+enjoyable as the trip itself.
 
 ## What we build
 
