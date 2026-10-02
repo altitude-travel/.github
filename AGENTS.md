@@ -127,5 +127,5 @@ Biome-covered file type out of its reach):
 - **Lint**: `pnpm lint` (runs `bash ./scripts/lint.sh`)
 
 Always run the format command and verify with the lint command before submitting
-changes. shellcheck, shfmt, and jq are the system-level tools the scripts expect
-on PATH.
+changes. shfmt and shellcheck are the system-level tools the scripts expect on
+PATH.
