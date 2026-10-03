@@ -52,19 +52,27 @@ All shell scripts follow this structure:
 - **Indentation:** 2 spaces (`shfmt -i 2`); note `shfmt -i 0` means tabs
 - **Local declarations:** one `local` per line, never combined (`local a b`)
 - **Constants:** `SCRIPT_DIRECTORY` and `ROOT_DIRECTORY` as separate `readonly`
-  declarations
+  declarations; `SCRIPT_DIRECTORY` resolves to an absolute path
+  (`SCRIPT_DIRECTORY="$(cd "$(dirname "$0")" && pwd)"`) so every derived path is
+  independent of the caller's working directory and of symlinked entry points —
+  scripts that persist derived paths (symlink targets, config references) break
+  under relative resolution
 - **Function syntax:** `function name {` (not `name() {`)
-- **Logging:** `print_error` (stderr) and `print_information` (stdout) using
-  `printf "[ERROR]: %s\n"` and `printf "[INFO]: %s\n"` respectively
+- **Logging:** `print_error` (stderr) and `print_information` (stdout), sourced
+  from `common.sh` (before it is sourced, the failure guard prints its own
+  `printf "[ERROR]: %s\n"` line directly); a script's error handling may print
+  directly with `printf "[ERROR]: %s\n"` as well
 - **Documentation:** Every script documents with
   [shdoc](https://github.com/reconquest/shdoc) syntax; agents must read the
   documentation to apply the proper tags, in the standard order: description,
   `@see`/`@internal`, `@arg` lines together, `@example`, `@stdout`/`@stderr`
-  paired, `@exitcode`s grouped; every sourced file is guarded by an `if` block
-  testing it, and shellcheck suppression directives never appear in source
+  paired, `@exitcode`s grouped — each tag group separated from the next by one
+  blank line (repeated same-type tags stay together); every sourced file is
+  guarded by an `if` block testing it, and shellcheck suppression directives
+  never appear in source
 - **Usage:** Every script includes `print_usage` with `-h`/`--help` support
 - **Dependency checks:** `command_exists` function for non-system tools
-- **File checks:** `file_exists` function for file existence
+- **File checks:** plain `[ -f "$path" ]` tests — no `file_exists` helper
 - **Pure functions:** Functions take arguments — they do not reach for globals;
   helper functions may adjust shell options internally but restore the caller's
   state before returning
@@ -120,7 +128,7 @@ All shell scripts follow this structure:
   if [ -s "$SCRIPT_DIRECTORY/common.sh" ]; then
     source "$SCRIPT_DIRECTORY/common.sh"
   else
-    print_error "The shared helper module is missing: $SCRIPT_DIRECTORY/common.sh"
+    printf "[ERROR]: The shared helper module is missing: %s\n" "$SCRIPT_DIRECTORY/common.sh" >&2
     exit 1
   fi
   ```
@@ -161,9 +169,21 @@ All shell scripts follow this structure:
 - **Formatting:** `shfmt -i 2 -l -w -s` for writing, `shfmt -i 2 -s -d` for
   checking
 - **Minimum bash:** 5.x — the maintained major; the constructs this standard
-  mandates (arrays, mapfile, globstar) assume it
+  mandates (arrays, mapfile, globstar) assume it. macOS runners need this
+  enforced at install time: GitHub's `macos-26` image ships `/bin/bash` 3.2, so
+  a macOS CI job running these scripts must `brew install bash` first (the
+  `#!/usr/bin/env bash` resolution then finds the 5.x brew version)
 - **Shared helpers:** Scripts source the org-level `common.sh` for logging,
-  command checks, and shell-script discovery rather than redefining them
+  command checks, and shell-script discovery rather than redefining them; the
+  module deploys to `scripts/common.sh` at the repository root and a script
+  sources it as `$ROOT_DIRECTORY/scripts/common.sh` — the same path from every
+  script depth (this file's outline shows the same-directory spelling because
+  the outline's script sits in `scripts/`) — always behind the guard; a script
+  whose directory layout separates the repository root from a working directory
+  (for example a nested build script whose Docker context is not the root) keeps
+  `ROOT_DIRECTORY` on the repository root and gives the working directory its
+  own constant, with a comment above the constant recording the deviation and
+  the reason
 
 The canonical outline (section order matters — helpers before `main`, no logic
 outside functions):
@@ -173,19 +193,20 @@ outside functions):
 
 set -euo pipefail
 
-SCRIPT_DIRECTORY="$(dirname "$0")"
+SCRIPT_DIRECTORY="$(cd "$(dirname "$0")" && pwd)"
 readonly SCRIPT_DIRECTORY
 ROOT_DIRECTORY="$(dirname "$SCRIPT_DIRECTORY")"
 readonly ROOT_DIRECTORY
 
-function print_error {
-  printf "[ERROR]: %s\n" "$1" >&2
-}
+# Scripts outside scripts/ spell the path $ROOT_DIRECTORY/scripts/common.sh.
+if [ -s "$SCRIPT_DIRECTORY/common.sh" ]; then
+  source "$SCRIPT_DIRECTORY/common.sh"
+else
+  printf "[ERROR]: The shared helper module is missing: %s\n" "$SCRIPT_DIRECTORY/common.sh" >&2
+  exit 1
+fi
 
-function print_information {
-  printf "[INFO]: %s\n" "$1" >&1
-}
-
+# Displays the usage text.
 function print_usage {
   printf "Usage: %s [OPTIONS]\n" "$0"
   printf "\n"
@@ -193,14 +214,6 @@ function print_usage {
   printf "\n"
   printf "Options:\n"
   printf "  -h, --help    Show this help message and exit\n"
-}
-
-function command_exists {
-  command -v "$1" &>/dev/null
-}
-
-function file_exists {
-  [[ -f "$1" ]]
 }
 
 # Task-specific pure functions take arguments and return values —
@@ -248,6 +261,21 @@ self-describing and greppable across repositories. In Markdown link destinations
 the token appears bare (for example `basecamp-card-url`), because angle brackets
 do not survive Prettier's Markdown formatting; fill the URL in their place to
 form a proper link.
+
+### Policy deployment pull requests
+
+Automated policy deployment pull requests (opened by the normalisation
+automation on `automation/normalisation-` branches) are pre-approved at the
+organisation level in the `github-policies` repository. Review agents may read
+the diff and raise observations as review comments for humans to act on, but
+must not reject the pull request, request changes over managed-file content, or
+attempt to fix a finding inside the deployment — follow-up topics belong to
+humans.
+
+Every comment a review agent leaves on a policy deployment states: what it
+observed, where it lives (file and line), and which repository or template owns
+the fix. A finding inside managed-file content is raised in the
+`github-policies` repository, never patched in the receiving repository.
 
 ## Package Management
 
@@ -401,15 +429,15 @@ form a proper link.
 
 ## Formatting and Linting
 
-- **Order:** Prettier first (Markdown and the file types Biome does not
-  support), Biome second and final authority for every file type it supports,
-  then the ecosystem-specific formatters, then shfmt and ShellCheck for shell
-  scripts
-- **Prettier:**
-  `pnpm exec prettier --prose-wrap always --write . '!pnpm-lock.yaml'` for
+- **Order:** Prettier first (the file types Biome does not support — Markdown,
+  YAML, and friends), Biome second and the only authority for every file type it
+  covers, then the ecosystem-specific formatters, then shfmt and ShellCheck for
+  shell scripts
+- **Prettier:** `pnpm exec prettier --prose-wrap always --write .` for
   formatting and `--check` for linting; runs in every repository (the
-  devDependency is part of the standard manifest); the lockfile glob excludes
-  the machine-generated `pnpm-lock.yaml`
+  devDependency is part of the standard manifest); its reach is bounded by the
+  policy-deployed `.prettierignore` (the lockfile and every file type Biome
+  covers are ignored), so the two tools never disagree on the same file
 - **Biome:** the format step is `pnpm exec biome check --write .` (formatting
   plus safe lint fixes); the lint step is `pnpm exec biome check .`; the GitHub
   PR annotations reporter activates automatically when `CI=true`. Biome runs
@@ -427,12 +455,19 @@ form a proper link.
   `terraform validate`
 - **Shell scripts:** files are discovered by the `common.sh`
   `list_shell_scripts` helper (whole tree, gitignored paths excluded,
-  uncommitted files included); format step runs `shfmt -i 2 -w -s`, lint step
-  runs `shfmt -i 2 -s -d` and `shellcheck -x` over that list
-- **Scripts are policy-managed:** `scripts/format.sh`, `scripts/lint.sh`, and
-  `scripts/common.sh` are deployed by the `github-policies` repository and
-  overwritten on every policy sync — propose changes there, never in a
-  repository
+  uncommitted files included); format step runs `shfmt -i 2 -l -w -s`, lint step
+  runs `shfmt -i 2 -s -d` and
+  `shellcheck -x --source-path="$HOME" --severity=warning --shell=bash` over
+  that list; extensionless scripts (for example `bin/up` or `docker-images`'s
+  `node/scripts/build`) fall outside `.sh` discovery — name scripts with the
+  `.sh` extension so the gates cover them, and remediate an existing
+  extensionless script by renaming it to `*.sh` in the same change that adopts
+  the standard for it
+- **Scripts are policy-managed:** every file the automation deploys is
+  overwritten on every policy sync — including `scripts/format.sh`,
+  `scripts/lint.sh`, and `scripts/common.sh`, plus any per-repository override
+  files (for example infra's `docker-health-check.sh`) — so propose changes in
+  the `github-policies` repository, never in a repository
 
 - **Biome `useImportType` rule:** Disabled (`"off"`) in `biome.json`. Biome's
   default recommended ruleset promotes value imports to `import type`, which

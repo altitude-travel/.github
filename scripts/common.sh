@@ -5,6 +5,7 @@
 # here — propose changes in github-policies instead.
 
 # @name common
+
 # @brief Helpers shared by the organisation's format and lint scripts.
 
 set -euo pipefail
@@ -72,6 +73,7 @@ function shopt_state {
 # @stdout Nothing on success.
 #
 # @stderr An error message if the option name is not a shell option.
+
 # @exitcode 0 If the option was set to the requested state.
 # @exitcode 1 If the name is not a shell option.
 function shopt_state_toggle {
@@ -113,9 +115,13 @@ function shopt_state_toggle {
 # @arg $1 string The directory to search from (for example ROOT_DIRECTORY).
 #
 # @stdout One .sh path per line, relative as given.
-# @stderr An [ERROR] line per ignored or unresolvable file.
-#
-# @exitcode 0 Always.
+
+# @stderr An [ERROR] line per ignored or unresolvable file, and the
+#   unsupported-option error when the running bash lacks globstar.
+
+# @exitcode 0 When the walk completes.
+# @exitcode 1 When the running bash cannot toggle the walk's shell options
+#   (bash 3.2 lacks globstar; the standard mandates bash 5.x).
 function list_shell_scripts {
   local base_directory="$1"
   local script
