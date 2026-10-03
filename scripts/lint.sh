@@ -5,12 +5,13 @@
 # here — propose changes in github-policies instead.
 
 # @name lint
+
 # @brief Checks the whole codebase with Prettier, Biome, ecosystem linters,
 #        shfmt, and ShellCheck.
 
 set -euo pipefail
 
-SCRIPT_DIRECTORY="$(dirname "$0")"
+SCRIPT_DIRECTORY="$(cd "$(dirname "$0")" && pwd)"
 readonly SCRIPT_DIRECTORY
 ROOT_DIRECTORY="$(dirname "$SCRIPT_DIRECTORY")"
 readonly ROOT_DIRECTORY
@@ -18,7 +19,7 @@ readonly ROOT_DIRECTORY
 if [ -s "$SCRIPT_DIRECTORY/common.sh" ]; then
   source "$SCRIPT_DIRECTORY/common.sh"
 else
-  print_error "The shared helper module is missing: $SCRIPT_DIRECTORY/common.sh"
+  printf "[ERROR]: The shared helper module is missing: %s\n" "$SCRIPT_DIRECTORY/common.sh" >&2
   exit 1
 fi
 
@@ -45,6 +46,7 @@ function print_usage {
 # @stdout The [INFO] progress lines and a skip notice off macOS.
 #
 # @stderr The installer hint when swiftformat is missing.
+
 # @exitcode 0 When skipped or clean.
 # @exitcode 1 When swiftformat is missing or Swift is unclean.
 function lint_swift {
@@ -58,7 +60,10 @@ function lint_swift {
   fi
 
   print_information "Checking Swift formatting with SwiftFormat..."
-  swiftformat . --lint
+  if ! swiftformat . --lint; then
+    print_error "SwiftFormat lint check failed."
+    exit 1
+  fi
 
   if [ "$(uname)" != "Darwin" ] || ! command_exists swiftlint; then
     print_information "SwiftLint skipped (requires SourceKit, available on macOS only)."
@@ -72,7 +77,10 @@ function lint_swift {
     swiftlint_args+=(--reporter github-actions-logging)
   fi
 
-  swiftlint lint "${swiftlint_args[@]}"
+  if ! swiftlint lint "${swiftlint_args[@]}"; then
+    print_error "SwiftLint failed."
+    exit 1
+  fi
 }
 
 # Checks Terraform formatting and validates the configuration; no-op when no
@@ -81,6 +89,7 @@ function lint_swift {
 # @stdout The [INFO] progress lines.
 #
 # @stderr The missing-tool error or the failing check.
+
 # @exitcode 0 When skipped or valid.
 # @exitcode 1 When terraform is missing or validation fails.
 function lint_terraform {
@@ -94,11 +103,17 @@ function lint_terraform {
   fi
 
   print_information "Checking Terraform formatting..."
-  terraform fmt -check -recursive
+  if ! terraform fmt -check -recursive; then
+    print_error "Terraform format check failed."
+    exit 1
+  fi
 
   print_information "Validating Terraform configuration..."
   terraform init -backend=false -upgrade -input=false >/dev/null
-  terraform validate
+  if ! terraform validate; then
+    print_error "Terraform validation failed."
+    exit 1
+  fi
 }
 
 # Checks shell script formatting with shfmt and lints with ShellCheck across
@@ -107,6 +122,7 @@ function lint_terraform {
 # @stdout The [INFO] progress lines.
 #
 # @stderr The missing-tool error or the shfmt diff.
+
 # @exitcode 0 When no scripts remain or checks pass.
 # @exitcode 1 When a tool is missing or a check fails.
 function lint_shell_scripts {
@@ -127,41 +143,103 @@ function lint_shell_scripts {
   fi
 
   print_information "Checking shell script formatting with shfmt..."
-  shfmt -i 2 -s -d "${script_files[@]}"
+  if ! shfmt -i 2 -s -d "${script_files[@]}"; then
+    print_error "shfmt formatting check failed."
+    exit 1
+  fi
 
   print_information "Linting shell scripts with ShellCheck..."
-  shellcheck -x -S warning "${script_files[@]}"
+  if ! shellcheck -x --source-path="$HOME" --severity=warning --shell=bash "${script_files[@]}"; then
+    print_error "ShellCheck failed."
+    exit 1
+  fi
 }
 
-# Checks Markdown and the file types Biome does not support.
+# Checks the file types Biome does not support (Markdown, YAML, and friends).
 #
 # @stdout The [INFO] progress line and Prettier's check output.
-#
-# @exitcode 0 Always.
+
+# @stderr The failure line when the check fails.
+
+# @exitcode 0 When every file is Prettier-clean.
+# @exitcode 1 When Prettier reports unformatted files or fails.
 function lint_with_prettier {
   print_information "Checking formatting with Prettier..."
-  pnpm exec prettier --prose-wrap always --check . '!pnpm-lock.yaml'
+  if ! pnpm exec prettier --prose-wrap always --check .; then
+    print_error "Prettier formatting check failed."
+    exit 1
+  fi
 }
 
 # Runs Biome's formatter and linter; the GitHub reporter activates under CI.
 #
 # @stdout The [INFO] progress line and Biome's findings.
-#
-# @exitcode 0 Always; callers read Biome's own exit through the pipeline.
+
+# @stderr The failure line when the check fails.
+
+# @exitcode 0 When Biome reports no findings.
+# @exitcode 1 When Biome reports findings or fails.
 function lint_with_biome {
   print_information "Checking with Biome..."
-  biome_args=()
+  local biome_args=()
   if [ "${CI:-}" = "true" ]; then
     biome_args+=(--reporter=default --reporter=github)
   fi
 
-  pnpm exec biome check "${biome_args[@]}" .
+  if ! pnpm exec biome check "${biome_args[@]}" .; then
+    print_error "Biome check failed."
+    exit 1
+  fi
+}
+
+# Validates every tool the active lint pipeline will invoke before the first
+# check runs.
+#
+# @stderr The missing-tool error.
+#
+# @exitcode 0 When every required tool is present.
+# @exitcode 1 When a required tool is missing.
+function validate_lint_toolchain {
+  if ! command_exists pnpm; then
+    print_error "pnpm is not installed."
+    exit 1
+  fi
+
+  if ! pnpm exec prettier --version >/dev/null 2>&1; then
+    print_error "prettier is not resolvable. Add it to the devDependencies and install."
+    exit 1
+  fi
+
+  if ! pnpm exec biome --version >/dev/null 2>&1; then
+    print_error "biome is not resolvable. Add it to the devDependencies and install."
+    exit 1
+  fi
+
+  if [ -f "$ROOT_DIRECTORY/Package.swift" ] && ! command_exists swiftformat; then
+    print_error "swiftformat is not installed. Install it from https://github.com/nicklockwood/SwiftFormat"
+    exit 1
+  fi
+
+  if find "$ROOT_DIRECTORY" -name "*.tf" -print -quit | grep -q . && ! command_exists terraform; then
+    print_error "terraform is not installed."
+    exit 1
+  fi
+
+  if ! command_exists shfmt; then
+    print_error "shfmt is not installed."
+    exit 1
+  fi
+
+  if ! command_exists shellcheck; then
+    print_error "shellcheck is not installed."
+    exit 1
+  fi
 }
 
 # Parses the options, validates the toolchain, and runs every check.
 #
 # @exitcode 0 When all checks pass.
-# @exitcode 1 On an invalid option, missing pnpm, or a failed check.
+# @exitcode 1 On an invalid option or a failed preflight or check.
 # @exitcode 2 When ROOT_DIRECTORY is empty.
 function main {
   if [ -z "$ROOT_DIRECTORY" ]; then
@@ -185,10 +263,7 @@ function main {
 
   cd "$ROOT_DIRECTORY"
 
-  if ! command_exists pnpm; then
-    print_error "pnpm is not installed."
-    exit 1
-  fi
+  validate_lint_toolchain
 
   lint_with_prettier
   lint_with_biome

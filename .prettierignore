@@ -1,0 +1,28 @@
+# This file is centrally managed by the altitude-travel/github-policies
+# repository and will be overwritten on every policy sync. Do not edit it
+# here — propose changes in github-policies instead.
+
+# pnpm's lockfile is machine-generated and Dependabot rewrites it in its own
+# style, so formatting it would break Dependabot updates.
+pnpm-lock.yaml
+
+# Every file type Biome covers is Biome's to format; Prettier handles only
+# what this file leaves it. Keep this list in sync with the file types Biome
+# supports so the two formatters never disagree on a file. Component
+# single-file formats (.vue/.svelte/.astro) are deliberately out of scope
+# until the organisation holds such files.
+*.js
+*.cjs
+*.mjs
+*.jsx
+*.ts
+*.cts
+*.mts
+*.tsx
+*.json
+*.jsonc
+*.css
+*.graphql
+*.gql
+*.graphqls
+*.grit
