@@ -5,9 +5,7 @@
 # here — propose changes in github-policies instead.
 
 # @name lint
-
-# @brief Checks the whole codebase with Prettier, Biome, ecosystem linters,
-#        shfmt, and ShellCheck.
+# @brief Checks the whole codebase with Prettier, Biome, ecosystem linters, shfmt, and ShellCheck.
 
 set -euo pipefail
 
@@ -44,9 +42,8 @@ function print_usage {
 # no-op when this repository has no Package.swift.
 #
 # @stdout The [INFO] progress lines and a skip notice off macOS.
-#
 # @stderr The installer hint when swiftformat is missing.
-
+#
 # @exitcode 0 When skipped or clean.
 # @exitcode 1 When swiftformat is missing or Swift is unclean.
 function lint_swift {
@@ -87,9 +84,8 @@ function lint_swift {
 # *.tf files exist.
 #
 # @stdout The [INFO] progress lines.
-#
 # @stderr The missing-tool error or the failing check.
-
+#
 # @exitcode 0 When skipped or valid.
 # @exitcode 1 When terraform is missing or validation fails.
 function lint_terraform {
@@ -120,9 +116,8 @@ function lint_terraform {
 # the whole tracked tree.
 #
 # @stdout The [INFO] progress lines.
-#
 # @stderr The missing-tool error or the shfmt diff.
-
+#
 # @exitcode 0 When no scripts remain or checks pass.
 # @exitcode 1 When a tool is missing or a check fails.
 function lint_shell_scripts {
@@ -158,9 +153,8 @@ function lint_shell_scripts {
 # Checks the file types Biome does not support (Markdown, YAML, and friends).
 #
 # @stdout The [INFO] progress line and Prettier's check output.
-
 # @stderr The failure line when the check fails.
-
+#
 # @exitcode 0 When every file is Prettier-clean.
 # @exitcode 1 When Prettier reports unformatted files or fails.
 function lint_with_prettier {
@@ -174,9 +168,8 @@ function lint_with_prettier {
 # Runs Biome's formatter and linter; the GitHub reporter activates under CI.
 #
 # @stdout The [INFO] progress line and Biome's findings.
-
 # @stderr The failure line when the check fails.
-
+#
 # @exitcode 0 When Biome reports no findings.
 # @exitcode 1 When Biome reports findings or fails.
 function lint_with_biome {

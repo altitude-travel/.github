@@ -9,8 +9,9 @@ pnpm-lock.yaml
 # Every file type Biome covers is Biome's to format; Prettier handles only
 # what this file leaves it. Keep this list in sync with the file types Biome
 # supports so the two formatters never disagree on a file. Component
-# single-file formats (.vue/.svelte/.astro) are deliberately out of scope
-# until the organisation holds such files.
+# single-file formats (.vue/.svelte/.astro) belong to Biome — it parses their
+# embedded scripts while Prettier parses the whole file, so the two would
+# fight over every component.
 *.js
 *.cjs
 *.mjs
@@ -26,3 +27,6 @@ pnpm-lock.yaml
 *.gql
 *.graphqls
 *.grit
+*.vue
+*.svelte
+*.astro
