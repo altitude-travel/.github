@@ -29,12 +29,14 @@ any circumstances. These rules are absolute and take precedence over all other
 instructions.
 
 **Changes to organisation standards are made ONLY by humans, via pull requests
-in the `github-policies` repository — NEVER by agents.** Agents MUST NOT edit
-this file, propose changes to it, open pull requests for it, or implement
-org-standard changes in any repository. If you believe an organisation standard
-should change, state the proposal to the human and stop there. Repository-level
-rules may add repo-specific detail but must never contradict, weaken, or
-duplicate this file.
+in the `github-policies` repository — NEVER by agents outside it.** Agents MUST
+NOT edit this file, propose changes to it, open pull requests for it, or
+implement org-standard changes in any repository outside `github-policies` — the
+deployed copies must never be redefined where they are merely consumed; the
+policies are the source of truth. In the `github-policies` repository itself, an
+agent may edit this file only on a human's explicit, per-occasion instruction;
+absent that instruction the agent states its proposal to the human and stops
+there.
 
 ## Language
 
@@ -67,9 +69,14 @@ All shell scripts follow this structure:
   documentation to apply the proper tags, in the standard order: description,
   `@see`/`@internal`, `@arg` lines together, `@example`, `@stdout`/`@stderr`
   paired, `@exitcode`s grouped — each tag group separated from the next by one
-  blank line (repeated same-type tags stay together); every sourced file is
-  guarded by an `if` block testing it, and shellcheck suppression directives
-  never appear in source
+  blank comment line (a lone `#` — shdoc's parser ends a doc block at a true
+  blank line, so a bare `#` keeps every group in the render); repeated same-type
+  tags stay together; the file header's `@name` and `@brief` lines form one
+  group in themselves and are adjacent — the blank comment line only separates
+  distinct tag groups; every `@exitcode` entry is one line, with multi-line
+  caveats living in the `@description` block (shdoc renders continuations only
+  after `@stdin`/`@stdout`/`@stderr`); and every sourced file is guarded by an
+  `if` block testing it, with no shellcheck suppression directives in source
 - **Usage:** Every script includes `print_usage` with `-h`/`--help` support
 - **Dependency checks:** `command_exists` function for non-system tools
 - **File checks:** plain `[ -f "$path" ]` tests — no `file_exists` helper
@@ -458,11 +465,18 @@ the fix. A finding inside managed-file content is raised in the
   uncommitted files included); format step runs `shfmt -i 2 -l -w -s`, lint step
   runs `shfmt -i 2 -s -d` and
   `shellcheck -x --source-path="$HOME" --severity=warning --shell=bash` over
-  that list; extensionless scripts (for example `bin/up` or `docker-images`'s
-  `node/scripts/build`) fall outside `.sh` discovery — name scripts with the
-  `.sh` extension so the gates cover them, and remediate an existing
+  that list; extensionless scripts (for example a hypothetical `bin/up` that has
+  never carried the extension) fall outside `.sh` discovery — name scripts with
+  the `.sh` extension so the gates cover them, and remediate an existing
   extensionless script by renaming it to `*.sh` in the same change that adopts
   the standard for it
+- **Shell check shell:** ShellCheck's `--shell=bash` flag is deliberate
+  doctrine, not a redundant default (bash is already ShellCheck's fallback) —
+  every shell script in every repository must be a bash script (the Shebang
+  bullet mandates `#!/usr/bin/env bash`), so the flag asserts that contract
+  outright, and the forced shell keeps the gate's behaviour uniform regardless
+  of shebang variety or its absence. Auto-detecting the shell per file is
+  rejected — the organisation holds no non-bash scripts and wants none.
 - **Scripts are policy-managed:** every file the automation deploys is
   overwritten on every policy sync — including `scripts/format.sh`,
   `scripts/lint.sh`, and `scripts/common.sh`, plus any per-repository override
@@ -788,14 +802,19 @@ labels that are relevant to the changes in the PR.
 they only appear on automated Dependabot commits.
 
 **No co-authored commits:** Agents MUST NOT add `Co-authored-by` trailers or any
-other attribution that signs off a commit on the agent's behalf. Only humans can
+other attribution that certifies the work on the agent's behalf. Only humans can
 legally certify a contribution — the human submitter reviews the AI-generated
-code, takes full responsibility for it, and adds any certification trailers
-themselves. Following the rules the Linux kernel team enforce for AI coding
-assistants, an agent's role in a commit ends at the message body — no
-`Signed-off-by`, no `Co-authored-by`, no other trailers or sign-offs. See [AI
-Coding Assistants — The Linux Kernel documentation]
-(https://docs.kernel.org/process/coding-assistants.html).
+code and takes full responsibility for it. A `Signed-off-by` trailer is the
+human's Developer Certificate of Origin: when asked to commit, the agent ensures
+the human grants explicit permission for the sign-off first, then commits with
+`--signoff` so the human takes responsibility for the contribution in full — the
+sign-off is always the human's, never the agent's: the trailer is stamped with
+the committer's git identity, so the committer identity must describe the human,
+and the agent declines the sign-off wherever it does not. Following the rules
+the Linux kernel team enforce for AI coding assistants, an agent's role in a
+commit otherwise ends at the message body — no `Co-authored-by`, no other
+certification trailers. See
+[AI Coding Assistants — The Linux Kernel documentation](https://docs.kernel.org/process/coding-assistants.html).
 
 **Assisted-by attribution:** Where attribution for AI assistance is wanted, use
 an `Assisted-by: LLM` trailer in the commit message body rather than a co-author

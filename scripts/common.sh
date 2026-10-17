@@ -5,7 +5,6 @@
 # here — propose changes in github-policies instead.
 
 # @name common
-
 # @brief Helpers shared by the organisation's format and lint scripts.
 
 set -euo pipefail
@@ -71,9 +70,8 @@ function shopt_state {
 #   shopt_state_toggle dotglob "on"
 #
 # @stdout Nothing on success.
-#
 # @stderr An error message if the option name is not a shell option.
-
+#
 # @exitcode 0 If the option was set to the requested state.
 # @exitcode 1 If the name is not a shell option.
 function shopt_state_toggle {
@@ -101,27 +99,25 @@ function shopt_state_toggle {
   return 1
 }
 
-# Lists every .sh file below the given base directory that git does not
-# ignore.
-#
-# @description Untracked but not-ignored files are included so files can be
-# formatted before their first commit; ignored locations (node_modules, dist,
+# @description Lists every .sh file below the given base directory that git
+# does not ignore. Untracked but not-ignored files are included so files can
+# be formatted before their first commit; ignored locations (node_modules, dist,
 # vendor) are excluded. When the ignore check itself cannot answer (paths
 # inside submodules, beyond symlinks, or outside a repository) the file is
 # not ours to format: it is dropped with an [ERROR] line rather than
 # silently included. Globstar and nullglob are enabled only for the walk
-# and restored to the caller's state afterwards.
+# and restored to the caller's state afterwards. A bash lacking the walk's
+# options never returns: the failing toggle aborts the shell outright, and
+# callers drain this function through process substitution, which no exit
+# status could cross anyway.
 #
 # @arg $1 string The directory to search from (for example ROOT_DIRECTORY).
 #
 # @stdout One .sh path per line, relative as given.
-
 # @stderr An [ERROR] line per ignored or unresolvable file, and the
 #   unsupported-option error when the running bash lacks globstar.
-
+#
 # @exitcode 0 When the walk completes.
-# @exitcode 1 When the running bash cannot toggle the walk's shell options
-#   (bash 3.2 lacks globstar; the standard mandates bash 5.x).
 function list_shell_scripts {
   local base_directory="$1"
   local script

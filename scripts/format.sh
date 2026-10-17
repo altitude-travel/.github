@@ -5,9 +5,7 @@
 # here — propose changes in github-policies instead.
 
 # @name format
-
-# @brief Formats the whole codebase with Prettier, Biome, ecosystem
-#        formatters, and shfmt.
+# @brief Formats the whole codebase with Prettier, Biome, ecosystem formatters, and shfmt.
 
 set -euo pipefail
 
@@ -43,7 +41,7 @@ function print_usage {
 # Formats the file types Biome does not support (Markdown, YAML, and friends).
 #
 # @stdout The [INFO] progress line and Prettier's write output.
-
+#
 # @exitcode 0 When formatting completes.
 # @exitcode 1 When Prettier fails.
 function format_with_prettier {
@@ -57,7 +55,7 @@ function format_with_prettier {
 # Fixes formatting and applies safe lint fixes, the final formatter.
 #
 # @stdout The [INFO] progress line and Biome's fix output.
-
+#
 # @exitcode 0 When the check completes.
 # @exitcode 1 When Biome fails.
 function format_with_biome {
@@ -72,9 +70,8 @@ function format_with_biome {
 # otherwise.
 #
 # @stdout The [INFO] progress line when it runs.
-
 # @stderr The installer hint when swiftformat is missing.
-
+#
 # @exitcode 0 When skipped or complete.
 # @exitcode 1 When swiftformat is missing.
 function format_swift {
@@ -94,9 +91,8 @@ function format_swift {
 # Formats Terraform files when *.tf files exist; no-op otherwise.
 #
 # @stdout The [INFO] progress line when it runs.
-
 # @stderr The missing-tool error.
-
+#
 # @exitcode 0 When skipped or complete.
 # @exitcode 1 When terraform is missing.
 function format_terraform {
@@ -115,12 +111,12 @@ function format_terraform {
 
 # Formats shell scripts with shfmt across the whole tracked tree.
 #
-# @stdout The [INFO] progress line when scripts exist.
-
+# @stdout The [INFO] progress line when scripts exist, and one bare file
+#   name per rewritten file (shfmt's -l listing).
 # @stderr The missing-tool error.
-
+#
 # @exitcode 0 When no scripts remain or formatting completes.
-# @exitcode 1 When shfmt is missing.
+# @exitcode 1 When shfmt is missing or a file fails to format.
 function format_shell_scripts {
   if ! command_exists shfmt; then
     print_error "shfmt is not installed."
