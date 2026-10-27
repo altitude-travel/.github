@@ -3,7 +3,9 @@
 # here — propose changes in github-policies instead.
 
 # pnpm's lockfile is machine-generated and Dependabot rewrites it in its own
-# style, so formatting it would break Dependabot updates.
+# style, so no formatter may touch it: Prettier ignores it here, and the
+# deployed biome.base.json disables the formatter, linter, and assist for it
+# via an override.
 pnpm-lock.yaml
 
 # Every file type Biome covers is Biome's to format; Prettier handles only
@@ -11,7 +13,8 @@ pnpm-lock.yaml
 # supports so the two formatters never disagree on a file. Component
 # single-file formats (.vue/.svelte/.astro) belong to Biome — it parses their
 # embedded scripts while Prettier parses the whole file, so the two would
-# fight over every component.
+# fight over every component. MDX stays with Prettier — Biome does not
+# support it.
 *.js
 *.cjs
 *.mjs
@@ -23,6 +26,7 @@ pnpm-lock.yaml
 *.json
 *.jsonc
 *.css
+*.scss
 *.graphql
 *.gql
 *.graphqls
@@ -30,3 +34,7 @@ pnpm-lock.yaml
 *.vue
 *.svelte
 *.astro
+*.md
+*.markdown
+*.yaml
+*.yml
