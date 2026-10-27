@@ -14,8 +14,7 @@ on:
         type: number
 
 concurrency:
-  group:
-    ${{ github.workflow }}-${{ inputs.pr_number ||
+  group: ${{ github.workflow }}-${{ inputs.pr_number ||
     github.event.pull_request.number }}
   cancel-in-progress: true
 

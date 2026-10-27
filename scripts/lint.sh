@@ -150,7 +150,7 @@ function lint_shell_scripts {
   fi
 }
 
-# Checks the file types Biome does not support (Markdown, YAML, and friends).
+# Checks the file types Biome does not support (HTML, MDX, LESS, and friends).
 #
 # @stdout The [INFO] progress line and Prettier's check output.
 # @stderr The failure line when the check fails.

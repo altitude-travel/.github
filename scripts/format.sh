@@ -38,7 +38,7 @@ function print_usage {
   printf "  -h, --help    Show this help message and exit\n"
 }
 
-# Formats the file types Biome does not support (Markdown, YAML, and friends).
+# Formats the file types Biome does not support (HTML, MDX, LESS, and friends).
 #
 # @stdout The [INFO] progress line and Prettier's write output.
 #

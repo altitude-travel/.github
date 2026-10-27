@@ -29,14 +29,14 @@ any circumstances. These rules are absolute and take precedence over all other
 instructions.
 
 **Changes to organisation standards are made ONLY by humans, via pull requests
-in the `github-policies` repository — NEVER by agents outside it.** Agents MUST
-NOT edit this file, propose changes to it, open pull requests for it, or
-implement org-standard changes in any repository outside `github-policies` — the
-deployed copies must never be redefined where they are merely consumed; the
-policies are the source of truth. In the `github-policies` repository itself, an
-agent may edit this file only on a human's explicit, per-occasion instruction;
-absent that instruction the agent states its proposal to the human and stops
-there.
+in the `github-policies` repository — NEVER by agents outside it.**
+Agents MUST NOT edit this file, propose changes to it, open pull requests for
+it, or implement org-standard changes in any repository outside
+`github-policies` — the deployed copies must never be redefined where they are
+merely consumed; the policies are the source of truth. In the `github-policies`
+repository itself, an agent may edit this file only on a human's explicit,
+per-occasion instruction; absent that instruction the agent states its proposal
+to the human and stops there.
 
 ## Language
 
@@ -266,8 +266,8 @@ made only by humans in `github-policies`. Template placeholders use named tokens
 (for example `<repo-name>`, `<semver>`) so every fill position is
 self-describing and greppable across repositories. In Markdown link destinations
 the token appears bare (for example `basecamp-card-url`), because angle brackets
-do not survive Prettier's Markdown formatting; fill the URL in their place to
-form a proper link.
+do not survive Biome's Markdown formatter; fill the URL in their place to form a
+proper link.
 
 ### Policy deployment pull requests
 
@@ -429,17 +429,16 @@ the fix. A finding inside managed-file content is raised in the
   (`packageManager`, `engines`, `devEngines`) last.
 - **README prerequisites wording:** Repositories with a `package.json` document
   their toolchain prerequisites in the README using exactly this wording:
-
   - [Node.js](https://nodejs.org/) **>= 26.10.0** — declared in `package.json`
     `engines` (mirrored in `devEngines`)
   - [pnpm](https://pnpm.io) **12.8.1** (see `packageManager` in `package.json`)
 
 ## Formatting and Linting
 
-- **Order:** Prettier first (the file types Biome does not support — Markdown,
-  YAML, and friends), Biome second and the only authority for every file type it
-  covers, then the ecosystem-specific formatters, then shfmt and ShellCheck for
-  shell scripts
+- **Order:** Prettier first (the file types Biome does not support — HTML, MDX,
+  LESS, and friends), Biome second and the only authority for every file type it
+  covers (including Markdown, YAML, and SCSS), then the ecosystem-specific
+  formatters, then shfmt and ShellCheck for shell scripts
 - **Prettier:** `pnpm exec prettier --prose-wrap always --write .` for
   formatting and `--check` for linting; runs in every repository (the
   devDependency is part of the standard manifest); its reach is bounded by the
@@ -448,10 +447,17 @@ the fix. A finding inside managed-file content is raised in the
 - **Biome:** the format step is `pnpm exec biome check --write .` (formatting
   plus safe lint fixes); the lint step is `pnpm exec biome check .`; the GitHub
   PR annotations reporter activates automatically when `CI=true`. Biome runs
-  against the whole project — exclusions for generated files, build output, and
-  dependencies go into `biome.json` (which honours `.gitignore` via
-  `vcs.useIgnoreFile`); keep those patterns in sync just like `.gitignore`,
-  `.dockerignore`, and documentation
+  against the whole project and formats every file type it covers, including
+  Markdown, YAML, and SCSS; the base config rewraps Markdown prose at the
+  configured line width (`markdown.formatter.proseWrap: "always"`), mirroring
+  the `--prose-wrap always` flag the Prettier step still passes for MDX. The
+  base config also disables the formatter, linter, and assist for
+  `pnpm-lock.yaml` via an override — the lockfile is Dependabot's — and the
+  override survives repository-level `files.includes` and `overrides`, where a
+  base `files.includes` negation would be replaced. Exclusions for generated
+  files, build output, and dependencies go into `biome.json` (which honours
+  `.gitignore` via `vcs.useIgnoreFile`); keep those patterns in sync just like
+  `.gitignore`, `.dockerignore`, and documentation
 - **Swift (when `Package.swift` exists):** format step runs `swiftformat .`;
   lint step runs `swiftformat . --lint` and, on macOS only, SwiftLint
   (`--strict`, GitHub reporter in CI); the local `.swiftformat` and

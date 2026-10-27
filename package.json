@@ -23,10 +23,10 @@
     "lint": "bash ./scripts/lint.sh"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.14",
-    "prettier": "^3.9.9"
+    "@biomejs/biome": "^2.6.3",
+    "prettier": "^3.9.10"
   },
-  "packageManager": "pnpm@12.8.1",
+  "packageManager": "pnpm@12.15.0",
   "engines": {
     "node": ">=26.10.0"
   },
