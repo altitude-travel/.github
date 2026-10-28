@@ -54,6 +54,9 @@
     "formatter": {
       "enabled": true,
       "proseWrap": "always"
+    },
+    "parser": {
+      "frontmatter": true
     }
   },
   "yaml": {
@@ -64,6 +67,18 @@
   "overrides": [
     {
       "includes": ["**/pnpm-lock.yaml"],
+      "formatter": {
+        "enabled": false
+      },
+      "linter": {
+        "enabled": false
+      },
+      "assist": {
+        "enabled": false
+      }
+    },
+    {
+      "includes": ["**/CLAUDE.md"],
       "formatter": {
         "enabled": false
       },
