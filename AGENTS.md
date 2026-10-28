@@ -64,7 +64,7 @@ and any organisation-wide GitHub configuration that GitHub sources from the
 │   └── README.md          # Organisation profile (rendered on github.com/altitude-travel)
 ├── .gitignore             # Git ignore rules
 ├── AGENTS.md              # This document (AI agent instructions)
-├── CLAUDE.md              # Immutable Claude agent configuration (managed by github-policies)
+├── CLAUDE.md              # Symlink to AGENTS.md (managed by github-policies)
 └── LICENSE                # Project licence
 ```
 
