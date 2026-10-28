@@ -29,14 +29,14 @@ any circumstances. These rules are absolute and take precedence over all other
 instructions.
 
 **Changes to organisation standards are made ONLY by humans, via pull requests
-in the `github-policies` repository — NEVER by agents outside it.**
+in the `github-policies` repository, NEVER by agents outside it.**
 Agents MUST NOT edit this file, propose changes to it, open pull requests for
 it, or implement org-standard changes in any repository outside
-`github-policies` — the deployed copies must never be redefined where they are
-merely consumed; the policies are the source of truth. In the `github-policies`
-repository itself, an agent may edit this file only on a human's explicit,
-per-occasion instruction; absent that instruction the agent states its proposal
-to the human and stops there.
+`github-policies`. The deployed copies must never be redefined where they are
+merely consumed, because the policies are the source of truth. In the
+`github-policies` repository itself, an agent may edit this file only on a
+human's explicit, per-occasion instruction. Absent that instruction the agent
+states its proposal to the human and stops there.
 
 ## Language
 
@@ -45,49 +45,66 @@ messages, and any other text MUST use British English (e.g., `organisation` not
 `organization`, `normalise` not `normalize`, `colour` not `color`, `behaviour`
 not `behavior`, `licence` not `license`, `centre` not `center`).
 
+## Prose Style
+
+All text an agent writes must read as plain human prose. This covers
+documentation, commit messages, pull request descriptions, review comments, and
+every other piece of writing. A semicolon never joins two independent clauses. A
+colon never introduces a clause mid-sentence, and colons belong to labels, list
+introductions, and literal formats in code spans. Em-dash parentheticals are not
+used. When one sentence will not carry the thought, write two. Documentation is
+written for its reader, so human-facing files describe the repository and the
+work, and instructions aimed at agents live only in the agent files.
+`AGENTS.base.md` holds the organisation-wide standards and is deployed
+centrally, and each repository's `AGENTS.md` is repo-owned and adds only
+repository-specific rules on top of it. Documentation describes the present,
+never its own history, because git already records the history. README and
+AGENTS files carry no changelog sections.
+
 ## Shell Scripts
 
 All shell scripts follow this structure:
 
 - **Shebang:** `#!/usr/bin/env bash`
 - **Strict mode:** `set -euo pipefail`
-- **Indentation:** 2 spaces (`shfmt -i 2`); note `shfmt -i 0` means tabs
+- **Indentation:** 2 spaces (`shfmt -i 2`). Note `shfmt -i 0` means tabs
 - **Local declarations:** one `local` per line, never combined (`local a b`)
 - **Constants:** `SCRIPT_DIRECTORY` and `ROOT_DIRECTORY` as separate `readonly`
-  declarations; `SCRIPT_DIRECTORY` resolves to an absolute path
+  declarations. `SCRIPT_DIRECTORY` resolves to an absolute path
   (`SCRIPT_DIRECTORY="$(cd "$(dirname "$0")" && pwd)"`) so every derived path is
-  independent of the caller's working directory and of symlinked entry points —
-  scripts that persist derived paths (symlink targets, config references) break
-  under relative resolution
+  independent of the caller's working directory and of symlinked entry points,
+  because scripts that persist derived paths (symlink targets, config
+  references) break under relative resolution
 - **Function syntax:** `function name {` (not `name() {`)
 - **Logging:** `print_error` (stderr) and `print_information` (stdout), sourced
   from `common.sh` (before it is sourced, the failure guard prints its own
-  `printf "[ERROR]: %s\n"` line directly); a script's error handling may print
+  `printf "[ERROR]: %s\n"` line directly). A script's error handling may print
   directly with `printf "[ERROR]: %s\n"` as well
 - **Documentation:** Every script documents with
-  [shdoc](https://github.com/reconquest/shdoc) syntax; agents must read the
+  [shdoc](https://github.com/reconquest/shdoc) syntax. Agents must read the
   documentation to apply the proper tags, in the standard order: description,
   `@see`/`@internal`, `@arg` lines together, `@example`, `@stdout`/`@stderr`
-  paired, `@exitcode`s grouped — each tag group separated from the next by one
-  blank comment line (a lone `#` — shdoc's parser ends a doc block at a true
-  blank line, so a bare `#` keeps every group in the render); repeated same-type
-  tags stay together; the file header's `@name` and `@brief` lines form one
-  group in themselves and are adjacent — the blank comment line only separates
-  distinct tag groups; every `@exitcode` entry is one line, with multi-line
-  caveats living in the `@description` block (shdoc renders continuations only
-  after `@stdin`/`@stdout`/`@stderr`); and every sourced file is guarded by an
-  `if` block testing it, with no shellcheck suppression directives in source
+  paired, `@exitcode`s grouped. Each tag group is separated from the next by one
+  blank comment line, which is a lone `#` because shdoc's parser ends a doc
+  block at a true blank line, so a bare `#` keeps every group in the render.
+  Repeated same-type tags stay together. The file header's `@name` and `@brief`
+  lines form one group in themselves and are adjacent, and the blank comment
+  line only separates distinct tag groups. Every `@exitcode` entry is one line,
+  with multi-line caveats living in the `@description` block, because shdoc
+  renders continuations only after `@stdin`/`@stdout`/`@stderr`. Every sourced
+  file is guarded by an `if` block testing it, with no shellcheck suppression
+  directives in source
 - **Usage:** Every script includes `print_usage` with `-h`/`--help` support
 - **Dependency checks:** `command_exists` function for non-system tools
-- **File checks:** plain `[ -f "$path" ]` tests — no `file_exists` helper
-- **Pure functions:** Functions take arguments — they do not reach for globals;
-  helper functions may adjust shell options internally but restore the caller's
+- **File checks:** plain `[ -f "$path" ]` tests, with no `file_exists` helper
+- **Pure functions:** Functions take arguments and do not reach for globals.
+  Helper functions may adjust shell options internally but restore the caller's
   state before returning
 - **No `else` clauses:** the standard applies to every language in every
-  repository (shell, TypeScript, Swift, anything): `else`/`elif` branches are
-  not used. A condition's negative outcome is a **guard** — it terminates the
+  repository (shell, TypeScript, Swift, anything). `else`/`elif` branches are
+  not used. A condition's negative outcome is a **guard** that terminates the
   flow (`continue` inside loops, `return` inside functions, early `exit` in
-  scripts) and the happy path falls through:
+  scripts), and the happy path falls through:
 
   ```bash
   if [ ! -f "$CONFIG" ]; then
@@ -106,11 +123,10 @@ All shell scripts follow this structure:
   loadConfig(config);
   ```
 
-  When a check's _outcome_ is data — an error status to report, a fallback
-  value, a skipped optional step — the state is captured by an explicit
-  statement, then a guard acts on the captured state; short-circuit operators
-  (`||`, `&&`, `?:`) never handle error flow or carry side effects as their
-  alternative branch:
+  When a check's _outcome_ is data (an error status to report, a fallback value,
+  a skipped optional step), the state is captured by an explicit statement, then
+  a guard acts on the captured state. Short-circuit operators (`||`, `&&`, `?:`)
+  never handle error flow or carry side effects as their alternative branch:
 
   ```bash
   local ignore_status=0
@@ -128,7 +144,7 @@ All shell scripts follow this structure:
   ```
 
   The one sanctioned `else` is a **defensive failure guard** whose error branch
-  exits outright — nothing can continue without it, so no happy path exists to
+  exits outright. Nothing can continue without it, so no happy path exists to
   fall through:
 
   ```bash
@@ -142,58 +158,58 @@ All shell scripts follow this structure:
 
 - **No short-circuit error handling:** `|| fallback` and `&& guard` chains never
   stand in for an `if`: control flow belongs to explicit condition statements,
-  short-circuiting belongs to pure value expressions only — assigning a captured
+  short-circuiting belongs to pure value expressions only. Assigning a captured
   exit status (`command || status="$?"`) is such a pure value assignment, not
   flow handling.
 - **Comments:** comments in source code are an **exception, not a rule**. Doc
-  blocks are the expectation on every function, in the language's standard form
-  — [shdoc](https://github.com/reconquest/shdoc) for shell,
+  blocks are the expectation on every function, in the language's standard form.
+  That form is [shdoc](https://github.com/reconquest/shdoc) for shell,
   [JSDoc](https://jsdoc.app/) for JavaScript/TypeScript,
   [phpDocumentor](https://docs.phpdoc.org/) for PHP, and Google's
   [docstring style](https://google.github.io/styleguide/pyguide.html#38-comments-and-docstrings)
   for Python. A function without a doc block is remedied in the same change
   (clean as you go, per Documentation Maintenance). Inline comments exist only
-  where a specific line would otherwise be misleading — a fork between two
-  tools' interfaces (GNU date versus BSD date), a token's scope limitation, a
-  caller's contract. A comment is absent whenever one of these holds: the
+  where a specific line would otherwise be misleading, such as a fork between
+  two tools' interfaces (GNU date versus BSD date), a token's scope limitation,
+  or a caller's contract. A comment is absent whenever one of these holds: the
   statement below it already carries the same information in its own tokens or
   its error/log output, the comment would restate nearby documentation, or it
   narrates mechanics (a loop iterating, a variable being assigned) instead of
   explaining why the code is what it is.
 - **Quoting:** Variables and command substitutions are always quoted when they
-  expand into arguments; file lists captured from helpers are expanded through
+  expand into arguments. File lists captured from helpers are expanded through
   arrays (via `mapfile -t` and `"${files[@]}"`), never through re-splitting a
   string
 - **Entry point:** `main "$@"` followed by `exit 0`
 - **Argument handling:** Unknown flags error with `print_error` and
-  `print_usage`; non-flag arguments break out of the parsing loop
+  `print_usage`. Non-flag arguments break out of the parsing loop
 - **ShellCheck:** All scripts pass
-  `shellcheck -x --source-path="$HOME" --severity=warning --shell=bash` —
-  findings fail the gate; suppression directives (`# shellcheck source=`) never
-  appear in source; a `# shellcheck disable=SC1091` on an internal `common.sh`
+  `shellcheck -x --source-path="$HOME" --severity=warning --shell=bash` and
+  findings fail the gate. Suppression directives (`# shellcheck source=`) never
+  appear in source. A `# shellcheck disable=SC1091` on an internal `common.sh`
   source line is the only tolerated pattern, and source paths outside a
   repository must be guarded
 - **Formatting:** `shfmt -i 2 -l -w -s` for writing, `shfmt -i 2 -s -d` for
   checking
-- **Minimum bash:** 5.x — the maintained major; the constructs this standard
+- **Minimum bash:** 5.x, the maintained major. The constructs this standard
   mandates (arrays, mapfile, globstar) assume it. macOS runners need this
-  enforced at install time: GitHub's `macos-26` image ships `/bin/bash` 3.2, so
-  a macOS CI job running these scripts must `brew install bash` first (the
-  `#!/usr/bin/env bash` resolution then finds the 5.x brew version)
+  enforced at install time, because GitHub's `macos-26` image ships `/bin/bash`
+  3.2, so a macOS CI job running these scripts must `brew install bash` first
+  (the `#!/usr/bin/env bash` resolution then finds the 5.x brew version)
 - **Shared helpers:** Scripts source the org-level `common.sh` for logging,
-  command checks, and shell-script discovery rather than redefining them; the
-  module deploys to `scripts/common.sh` at the repository root and a script
-  sources it as `$ROOT_DIRECTORY/scripts/common.sh` — the same path from every
+  command checks, and shell-script discovery rather than redefining them. The
+  module deploys to `scripts/common.sh` at the repository root, and a script
+  sources it as `$ROOT_DIRECTORY/scripts/common.sh`, the same path from every
   script depth (this file's outline shows the same-directory spelling because
-  the outline's script sits in `scripts/`) — always behind the guard; a script
+  the outline's script sits in `scripts/`), always behind the guard. A script
   whose directory layout separates the repository root from a working directory
   (for example a nested build script whose Docker context is not the root) keeps
   `ROOT_DIRECTORY` on the repository root and gives the working directory its
   own constant, with a comment above the constant recording the deviation and
   the reason
 
-The canonical outline (section order matters — helpers before `main`, no logic
-outside functions):
+The canonical outline (section order matters, with helpers before `main` and no
+logic outside functions):
 
 ```bash
 #!/usr/bin/env bash
@@ -256,17 +272,20 @@ exit 0
 
 ## Centrally Managed Files
 
-Some repository files are deployed by the `github-policies` repository and carry
-a centrally-managed notice (for example `CLAUDE.md`, `AGENTS.base.md`,
-`biome.base.json`, `LICENSE`, the PR/issue templates, and the policy-deployed
-workflows). Never edit, override, or extend a file that carries this notice —
-propose changes in the `github-policies` repository instead. Agents MUST NOT
-propose or implement such changes themselves; organisation-level changes are
+Some repository files are deployed by the `github-policies` repository, for
+example `CLAUDE.md`, `AGENTS.base.md`, `biome.base.json`, `LICENSE`, the
+PR/issue templates, and the policy-deployed workflows. Every deployed file is
+centrally managed, whatever it carries. The comment-capable ones open with the
+centrally-managed notice, except `biome.base.json` where JSON has no comment
+syntax, `LICENSE` where the legal text must not be altered, and `CLAUDE.md`
+where a symlink cannot carry one. Never edit, override, or extend a deployed
+file. Propose changes in the `github-policies` repository instead. Agents MUST
+NOT propose or implement such changes themselves. Organisation-level changes are
 made only by humans in `github-policies`. Template placeholders use named tokens
 (for example `<repo-name>`, `<semver>`) so every fill position is
 self-describing and greppable across repositories. In Markdown link destinations
 the token appears bare (for example `basecamp-card-url`), because angle brackets
-do not survive Biome's Markdown formatter; fill the URL in their place to form a
+do not survive Biome's Markdown formatter. Fill the URL in their place to form a
 proper link.
 
 ### Policy deployment pull requests
@@ -276,7 +295,7 @@ automation on `automation/normalisation-` branches) are pre-approved at the
 organisation level in the `github-policies` repository. Review agents may read
 the diff and raise observations as review comments for humans to act on, but
 must not reject the pull request, request changes over managed-file content, or
-attempt to fix a finding inside the deployment — follow-up topics belong to
+attempt to fix a finding inside the deployment. Follow-up topics belong to
 humans.
 
 Every comment a review agent leaves on a policy deployment states: what it
@@ -284,13 +303,20 @@ observed, where it lives (file and line), and which repository or template owns
 the fix. A finding inside managed-file content is raised in the
 `github-policies` repository, never patched in the receiving repository.
 
+**Formatter deployments and the reformat trail:** a policy deployment carries
+the managed files and their own reformats only. It cannot run a receiving
+repository's toolchain. When a deployed formatter config changes canonical
+output, each receiving repository completes the reformat trail for its own files
+and lands the companion toolchain bump (for example the `@biomejs/biome`
+devDependency) in follow-up commits on the normalisation branch.
+
 ## Package Management
 
 - **Package manager:** pnpm (Do not use `corepack` for this)
 - **Prefer:** `pnpm exec` over `pnpm dlx`
 - **Node.js engine:** `>=26.10.0` in `package.json` `engines` field
-- **Package manager version:** `pnpm@12.8.1` (exact pin) in `package.json`
-  `packageManager` field. The organisation pins pnpm exactly — bump all
+- **Package manager version:** `pnpm@12.15.0` (exact pin) in `package.json`
+  `packageManager` field. The organisation pins pnpm exactly. Bump all
   repositories deliberately, together.
 - **Engine enforcement:** `pnpm-workspace.yaml` carries `engineStrict`, and
   `package.json` declares `devEngines` with both keys failing hard
@@ -298,29 +324,30 @@ the fix. A finding inside managed-file content is raised in the
   check) and `runtime` (name `node`, version `>=26.10.0`). Installs fail on
   toolchain mismatch.
 - **Known limitation:** Dependabot's npm/pnpm updater image runs Node 24, so its
-  installs trip the gates — repositories covered by Dependabot temporarily set
-  `engineStrict: false` and both `onFail` values to `"warn"` (visible warnings,
-  enforcement retained for humans). Flip back to `engineStrict: true` and
-  `onFail: "error"` once Dependabot's updater ships Node 26 (its own future
+  installs trip the gates, and repositories covered by Dependabot temporarily
+  set `engineStrict: false` and both `onFail` values to `"warn"` (visible
+  warnings, enforcement retained for humans). Flip back to `engineStrict: true`
+  and `onFail: "error"` once Dependabot's updater ships Node 26 (its own future
   topic). The repositories record this rationale in a comment above the
   `pnpm-workspace.yaml` keys so the temporary state survives personnel changes.
 - **Supply-chain settings:** every `pnpm-workspace.yaml` sets
   `autoInstallPeers: true`, `dedupePeerDependents: true`,
   `strictPeerDependencies: true`, and `minimumReleaseAgeStrict: true`.
 - **Manifest and workspace standard:** every repository with a `package.json`
-  follows the canonical shapes below — `packageManager: pnpm@12.8.1` (exact),
-  `engines: { node: ">=26.10.0" }`, and `devEngines` with `packageManager`
-  (`pnpm`, `>=12.8.1`) and `runtime` (`node`, `>=26.10.0`), both with `onFail`
-  per the Engine enforcement bullet — and every `pnpm-workspace.yaml` follows
-  the ordering shown in the workspace template: `engineStrict` first, then the
-  supply-chain keys, then a blank line, then `overrides`, then `allowBuilds`,
-  `packages`, and `catalog` where applicable, with any keys not shown in the
-  template (current or future) last. Every `overrides` pin carries a rationale
-  comment explaining why the pin exists and which ranges it satisfies.
+  follows the canonical shapes below, with `packageManager: pnpm@12.15.0`
+  (exact), `engines: { node: ">=26.10.0" }`, and `devEngines` with
+  `packageManager` (`pnpm`, `>=12.8.1`) and `runtime` (`node`, `>=26.10.0`),
+  both with `onFail` per the Engine enforcement bullet. Every
+  `pnpm-workspace.yaml` follows the ordering shown in the workspace template:
+  `engineStrict` first, then the supply-chain keys, then a blank line, then
+  `overrides`, then `allowBuilds`, `packages`, and `catalog` where applicable,
+  with any keys not shown in the template (current or future) last. Every
+  `overrides` pin carries a rationale comment explaining why the pin exists and
+  which ranges it satisfies.
 
   **Canonical `package.json` shape:**
 
-  The block is strict JSON so it can be adopted verbatim — any manifest
+  The block is strict JSON so it can be adopted verbatim. Any manifest
   conforming to it parses under strict `JSON.parse`. The block shows the
   temporary Dependabot-warn state: both `devEngines` `onFail` values here flip
   to `"error"` alongside `engineStrict: true` in `pnpm-workspace.yaml` once
@@ -349,7 +376,7 @@ the fix. A finding inside managed-file content is raised in the
       "build": "<only where the repository is buildable>",
       "test": "<only where tests exist>"
     },
-    "packageManager": "pnpm@12.8.1",
+    "packageManager": "pnpm@12.15.0",
     "engines": { "node": ">=26.10.0" },
     "devEngines": {
       "packageManager": {
@@ -367,21 +394,21 @@ the fix. A finding inside managed-file content is raised in the
   ```
 
   - **Naming:** every package name uses the organisation scope
-    `@altitude-travel/<name>` — repository roots use the repository name
-    (`@altitude-travel/web`), workspace members use their directory or feature
-    name (`@altitude-travel/ui`). Only the organisation `.github` repository is
-    public; every other manifest sets `"private": true`.
+    `@altitude-travel/<name>`, where repository roots use the repository name
+    (`@altitude-travel/web`) and workspace members use their directory or
+    feature name (`@altitude-travel/ui`). Only the organisation `.github`
+    repository is public, and every other manifest sets `"private": true`.
   - **Identity fields:** `version`, `description`, `keywords`, and
     `"license": "PROPRIETARY"` are mandatory on every manifest. `type: module`
-    applies where the toolchain is ESM; repositories whose framework requires
+    applies where the toolchain is ESM. Repositories whose framework requires
     CommonJS (for example the NestJS API) omit it. Workspace members point
     `repository`, `bugs`, and `homepage` at the repository that owns them.
   - **Scripts:** `format` and `lint` are mandatory and delegate to
-    `bash ./scripts/<name>.sh`; `build` exists only where the repository is
-    buildable; `test` exists where source code that tests could cover exists —
-    where source exists, tests should too. This delegation binds repository
-    roots; workspace members manage their own `format` and `lint` scripts (for
-    example via turbo) without `scripts/` directories.
+    `bash ./scripts/<name>.sh`. `build` exists only where the repository is
+    buildable. `test` exists where source code that tests could cover exists,
+    because where source exists, tests should too. This delegation binds
+    repository roots, and workspace members manage their own `format` and `lint`
+    scripts (for example via turbo) without `scripts/` directories.
 
   **Canonical `pnpm-workspace.yaml` shape:**
 
@@ -415,12 +442,12 @@ the fix. A finding inside managed-file content is raised in the
 - **Version source of truth:** `package.json` is the single source of truth for
   the Node.js version (`engines` field) and the pnpm version (`packageManager`
   field). Do not add `.nvmrc`, `.node-version`, or a `.npmrc` with engine
-  settings; do not hardcode `node-version` in workflows.
+  settings. Do not hardcode `node-version` in workflows.
 - **Lock files:** Always use `--frozen-lockfile` in CI and containers
 - **Scripts:** `format`, `lint`, `build`, `test` delegate to
   `bash ./scripts/<name>.sh` where they exist
 - **Manifest key order:** manifests order their keys exactly as in the canonical
-  `package.json` shape above — identity fields first (`name`, `version`,
+  `package.json` shape above, with identity fields first (`name`, `version`,
   `description`, `keywords`, `license`, `private`, `type`), then `repository`,
   `bugs`, and `homepage`, then `scripts`, then `dependencies`,
   `peerDependencies`, and `devDependencies`, then package-specific configuration
@@ -429,65 +456,72 @@ the fix. A finding inside managed-file content is raised in the
   (`packageManager`, `engines`, `devEngines`) last.
 - **README prerequisites wording:** Repositories with a `package.json` document
   their toolchain prerequisites in the README using exactly this wording:
-  - [Node.js](https://nodejs.org/) **>= 26.10.0** — declared in `package.json`
+  - [Node.js](https://nodejs.org/) **>= 26.10.0**, declared in `package.json`
     `engines` (mirrored in `devEngines`)
-  - [pnpm](https://pnpm.io) **12.8.1** (see `packageManager` in `package.json`)
+  - [pnpm](https://pnpm.io) **12.15.0** (see `packageManager` in `package.json`)
 
 ## Formatting and Linting
 
-- **Order:** Prettier first (the file types Biome does not support — HTML, MDX,
-  LESS, and friends), Biome second and the only authority for every file type it
-  covers (including Markdown, YAML, and SCSS), then the ecosystem-specific
-  formatters, then shfmt and ShellCheck for shell scripts
+- **Order:** Prettier first, covering the file types Biome does not support
+  (HTML, MDX, LESS, and friends), Biome second and the only authority for every
+  file type it covers (including Markdown, YAML, and SCSS), then the
+  ecosystem-specific formatters, then shfmt and ShellCheck for shell scripts
 - **Prettier:** `pnpm exec prettier --prose-wrap always --write .` for
-  formatting and `--check` for linting; runs in every repository (the
-  devDependency is part of the standard manifest); its reach is bounded by the
+  formatting and `--check` for linting, and it runs in every repository (the
+  devDependency is part of the standard manifest). Its reach is bounded by the
   policy-deployed `.prettierignore` (the lockfile and every file type Biome
   covers are ignored), so the two tools never disagree on the same file
 - **Biome:** the format step is `pnpm exec biome check --write .` (formatting
-  plus safe lint fixes); the lint step is `pnpm exec biome check .`; the GitHub
+  plus safe lint fixes). The lint step is `pnpm exec biome check .`. The GitHub
   PR annotations reporter activates automatically when `CI=true`. Biome runs
   against the whole project and formats every file type it covers, including
-  Markdown, YAML, and SCSS; the base config rewraps Markdown prose at the
+  Markdown, YAML, and SCSS. The base config rewraps Markdown prose at the
   configured line width (`markdown.formatter.proseWrap: "always"`), mirroring
   the `--prose-wrap always` flag the Prettier step still passes for MDX. The
   base config also disables the formatter, linter, and assist for
-  `pnpm-lock.yaml` via an override — the lockfile is Dependabot's — and the
-  override survives repository-level `files.includes` and `overrides`, where a
-  base `files.includes` negation would be replaced. Exclusions for generated
-  files, build output, and dependencies go into `biome.json` (which honours
-  `.gitignore` via `vcs.useIgnoreFile`); keep those patterns in sync just like
-  `.gitignore`, `.dockerignore`, and documentation
-- **Swift (when `Package.swift` exists):** format step runs `swiftformat .`;
-  lint step runs `swiftformat . --lint` and, on macOS only, SwiftLint
-  (`--strict`, GitHub reporter in CI); the local `.swiftformat` and
+  `pnpm-lock.yaml` and `CLAUDE.md` via overrides. The lockfile is Dependabot's,
+  and `CLAUDE.md` is a pure symlink pointing at `AGENTS.md`, so no formatter or
+  linter should touch either file. The overrides survive repository-level
+  `files.includes` and `overrides`, where a base `files.includes` negation would
+  be replaced. Exclusions for generated files, build output, and dependencies go
+  into `biome.json` (which honours `.gitignore` via `vcs.useIgnoreFile`). Keep
+  those patterns in sync just like `.gitignore`, `.dockerignore`, and
+  documentation
+- **Swift (when `Package.swift` exists):** format step runs `swiftformat .`.
+  Lint step runs `swiftformat . --lint` and, on macOS only, SwiftLint
+  (`--strict`, GitHub reporter in CI). The local `.swiftformat` and
   `.swiftlint.yml` configs stay repository-owned
 - **Terraform (when `*.tf` files exist):** format step runs
-  `terraform fmt -recursive`; lint step runs `terraform fmt -check -recursive`
+  `terraform fmt -recursive`. Lint step runs `terraform fmt -check -recursive`
   and then `terraform init -backend=false -upgrade -input=false` +
   `terraform validate`
 - **Shell scripts:** files are discovered by the `common.sh`
   `list_shell_scripts` helper (whole tree, gitignored paths excluded,
-  uncommitted files included); format step runs `shfmt -i 2 -l -w -s`, lint step
-  runs `shfmt -i 2 -s -d` and
+  uncommitted files included). Format step runs `shfmt -i 2 -l -w -s`, and lint
+  step runs `shfmt -i 2 -s -d` and
   `shellcheck -x --source-path="$HOME" --severity=warning --shell=bash` over
-  that list; extensionless scripts (for example a hypothetical `bin/up` that has
-  never carried the extension) fall outside `.sh` discovery — name scripts with
+  that list. Extensionless scripts (for example a hypothetical `bin/up` that has
+  never carried the extension) fall outside `.sh` discovery. Name scripts with
   the `.sh` extension so the gates cover them, and remediate an existing
   extensionless script by renaming it to `*.sh` in the same change that adopts
   the standard for it
 - **Shell check shell:** ShellCheck's `--shell=bash` flag is deliberate
-  doctrine, not a redundant default (bash is already ShellCheck's fallback) —
-  every shell script in every repository must be a bash script (the Shebang
+  doctrine, not a redundant default (bash is already ShellCheck's fallback).
+  Every shell script in every repository must be a bash script (the Shebang
   bullet mandates `#!/usr/bin/env bash`), so the flag asserts that contract
   outright, and the forced shell keeps the gate's behaviour uniform regardless
   of shebang variety or its absence. Auto-detecting the shell per file is
-  rejected — the organisation holds no non-bash scripts and wants none.
+  rejected, because the organisation holds no non-bash scripts and wants none.
 - **Scripts are policy-managed:** every file the automation deploys is
-  overwritten on every policy sync — including `scripts/format.sh`,
+  overwritten on every policy sync, including `scripts/format.sh`,
   `scripts/lint.sh`, and `scripts/common.sh`, plus any per-repository override
-  files (for example infra's `docker-health-check.sh`) — so propose changes in
-  the `github-policies` repository, never in a repository
+  files (for example infra's `docker-health-check.sh`). Propose changes in the
+  `github-policies` repository, never in a repository
+
+- **Markdown frontmatter:** the base config parses frontmatter
+  (`markdown.parser.frontmatter`), so frontmatter-carrying Markdown (skill
+  definitions and the like) keeps its YAML metadata intact while the body
+  formats normally
 
 - **Biome `useImportType` rule:** Disabled (`"off"`) in `biome.json`. Biome's
   default recommended ruleset promotes value imports to `import type`, which
@@ -495,7 +529,7 @@ the fix. A finding inside managed-file content is raised in the
   runtime. This rule must remain off in all repositories.
 - **`biome.base.json` is policy-managed:** This file is deployed by the
   `github-policies` repository and will be overwritten on every policy sync. Do
-  not modify it directly — changes to shared formatting or linting rules must go
+  not modify it directly. Changes to shared formatting or linting rules must go
   through the `github-policies` template. Repo-specific overrides belong in
   `biome.json` via `"extends": ["./biome.base.json"]`.
 
@@ -514,21 +548,21 @@ the fix. A finding inside managed-file content is raised in the
 
 ## CI/CD Conventions
 
-- **CI workflow:** `continuous-integration.yml` — triggers on all pull requests
+- **CI workflow:** `continuous-integration.yml` triggers on all pull requests
   (no branch filter) and `workflow_dispatch`. Standard jobs: `check` (lint →
   build → test, each with `--if-present`) and optional `docker` (validates
   container health via the `docker-health-check` composite action, polling
   `/api/v1/health`). Repos without build, test, or deployment targets may
   legitimately have smaller `check` jobs.
-- **CD workflow:** `continuous-delivery.yml` — triggers on push to `main` and
+- **CD workflow:** `continuous-delivery.yml` triggers on push to `main` and
   `workflow_dispatch` (repos with deployments only)
 - **CI concurrency:** `cancel-in-progress: true` (supersedes stale PR builds)
 - **CD concurrency:** `cancel-in-progress: false` (prevents partial deployments)
 - **pnpm scripts:** All `pnpm run` calls in CI use `--if-present` so repos
   without a given script silently skip it
 - **Node version in CI:** `actions/setup-node` always uses
-  `node-version-file: package.json` — the Node version comes from `package.json`
-  `engines`; never hardcode `node-version`.
+  `node-version-file: package.json`. The Node version comes from `package.json`
+  `engines`. Never hardcode `node-version`.
 - **Docker platform:** `linux/amd64` only (production server is x86_64)
 - **Docker cache:** `type=gha`, `mode=max`
 - **Build secrets:** Sensitive values use Docker BuildKit `secrets:` (not
@@ -539,13 +573,13 @@ the fix. A finding inside managed-file content is raised in the
 - **Health endpoint:** All services expose `/api/v1/health` returning
   `{ "status": "ok", "timestamp": "<ISO 8601 UTC>" }` with
   `Content-Type: application/json`, where `timestamp` comes from
-  `new Date().toISOString()` (always UTC — ECMA-262 mandates the `Z`-suffixed
-  UTC form, so no offset issues). Used by the `docker-health-check` composite
-  action and Docker HEALTHCHECK directives.
+  `new Date().toISOString()` (always UTC, because ECMA-262 mandates the
+  `Z`-suffixed UTC form, so no offset issues). Used by the `docker-health-check`
+  composite action and Docker HEALTHCHECK directives.
 - **CI is pre-production:** CI workflows must mirror CD as closely as possible.
   Docker builds in CI must use the same secrets, build-args, and target stages
   as CD. If CD passes secrets or environment variables to a Docker build, CI
-  must do the same — the organisation's GitHub secrets and variables are
+  must do the same, because the organisation's GitHub secrets and variables are
   available to all workflows. Do not use placeholder values, skip stages, or
   omit secrets in CI to work around build failures. CI validates the production
   build.
@@ -590,9 +624,16 @@ In both shapes, deployments MUST be tracked as GitHub Deployments using the
 `create-deployment` and `update-deployment` composite actions (org library,
 deployed via policy overrides): a deployment is created with status
 `in_progress` when the deploy starts and updated to `success` or `failure` when
-it finishes. Deployment jobs depend on a passing CI-equivalent gate
-(format/lint/build/test) — CD never ships code that CI would reject.
-`cancel-in-progress` is `false` so partial deployments cannot interleave.
+it finishes. Deployments are superseded and deleted, never accumulated.
+`create-deployment` creates the new deployment and then deletes the
+environment's previous ones, so a failed create never leaves the environment
+without a record, and `update-deployment` with `delete: true` removes every
+deployment of a retired environment (a closed pull request's preview). The
+deployments list reflects the active pull-request previews and the latest
+deployment of each persistent environment, production and staging alike.
+Deployment jobs depend on a passing CI-equivalent gate (format/lint/build/test),
+so CD never ships code that CI would reject. `cancel-in-progress` is `false` so
+partial deployments cannot interleave.
 
 ### Action Versions (Pinned)
 
@@ -613,22 +654,22 @@ it finishes. Deployment jobs depend on a passing CI-equivalent gate
 | `bats-core/bats-action`      | `@4.0.0` |
 | `pullfrog/pullfrog`          | `@v0`    |
 
-The versions in this table are the **expected values** — every reference in
+The versions in this table are the **expected values**, and every reference in
 every workflow must match them exactly. When a workflow's pin drifts from the
 table (e.g. Dependabot raises `actions/checkout` from `@v7` to `@v8`), the
 higher version becomes the new expected value: update the table, update every
 outdated reference to the newer version, and update any affected documentation
-in the same change. This is "clean as you go" — agents must do this proactively
+in the same change. This is "clean as you go". Agents must do this proactively
 without asking for permission, keeping the table and the workflows it describes
 in lockstep at all times.
 
 Pin style follows what the upstream action repository actually publishes: prefer
 the moving major tag (`@v6`, `@v7`) where the maintainer maintains one, and fall
 back to the full semver tag (`@4.0.0`) only where they do not (e.g.
-`bats-core/bats-action` publishes plain `x.y.z` tags with no major tag — `@4` or
-`@v4` would fail to resolve). A major tag floats to the latest minor and patch
-release within that major because the maintainer moves it on every release;
-GitHub Actions performs no semver resolution of its own.
+`bats-core/bats-action` publishes plain `x.y.z` tags with no major tag, so `@4`
+or `@v4` would fail to resolve). A major tag floats to the latest minor and
+patch release within that major because the maintainer moves it on every
+release, and GitHub Actions performs no semver resolution of its own.
 
 ## Environment Files
 
@@ -684,8 +725,8 @@ Fix the code, not the gate.
 
 ## Obligation to Fix
 
-If the agent encounters a pre-existing issue — one not caused by the current
-changes — that will affect CI, CD, other workflows, or cause problems
+If the agent encounters a pre-existing issue (one not caused by the current
+changes) that will affect CI, CD, other workflows, or cause problems
 post-deployment, the agent MUST fix it. This is NOT optional. The agent must not
 ignore, skip, or defer such issues regardless of whether they were introduced by
 the agent's own changes. A broken pipeline or a post-deployment failure is the
@@ -703,12 +744,12 @@ project changes. Do not begin implementation until the plan is approved.
   rather than building large imperative blocks.
 - **Type-driven development:** Types are derived from Zod schemas at system
   boundaries (API inputs, env vars, external data). Schemas are the source of
-  truth — types flow from them, not the other way around. The pipeline is:
+  truth, and types flow from them, not the other way around. The pipeline is
   schema → type → use the compiler, don't fight it.
 - **Parse, don't validate (mandatory):** At system boundaries (API inputs,
   environment variables, external data), data MUST be parsed into typed
-  structures using Zod schemas — never validated and cast. Parsing produces a
-  value whose type guarantees correctness; validation only checks and discards
+  structures using Zod schemas, never validated and cast. Parsing produces a
+  value whose type guarantees correctness. Validation only checks and discards
   the evidence. This rule is mandatory. Agents MUST NOT follow or preserve
   existing code that uses validate-and-cast patterns, even if written by a
   human. Fix it. See
@@ -726,12 +767,12 @@ project changes. Do not begin implementation until the plan is approved.
   No other internals (partial schemas, helper functions, intermediate types) may
   be exported from schema files. Schemas may reference other schemas via import.
   Source code outside schema files MUST use type guards and types to narrow
-  values — never access schema internals directly.
+  values. Never access schema internals directly.
 
 - **No type assertions or non-null assertions:** Using `as` or `!` (non-null
   assertion) in TypeScript is forbidden. They lie to the compiler and hide bugs.
   If a type doesn't match, fix the type or use Zod to parse into the correct
-  type. If a value might be `undefined`, validate it properly — never use `!` to
+  type. If a value might be `undefined`, validate it properly. Never use `!` to
   silence the compiler or `as` to force a type.
 - **No comments in source:** Code must be self-explanatory through naming and
   structure. Do not add comments to source files.
@@ -743,8 +784,8 @@ project changes. Do not begin implementation until the plan is approved.
   injectable and testable via constructor injection. No hidden dependencies, no
   singletons accessed via import side effects.
 - **Testability by design:** Code must be structured for testability from the
-  start. Use proper fixtures, factories, and architectural patterns — not hacks.
-  Mocks implement interfaces; they do not use `as` to bypass the type system.
+  start. Use proper fixtures, factories, and architectural patterns, not hacks.
+  Mocks implement interfaces. They do not use `as` to bypass the type system.
 
 ## Testing
 
@@ -758,7 +799,7 @@ project changes. Do not begin implementation until the plan is approved.
   implementation details. Testing the middle couples tests to implementation,
   makes refactoring painful, produces false failures on valid changes, and gives
   false confidence that the internals work while the contract may be broken.
-- **Unit tests:** Required for all business logic. Quality over quantity — test
+- **Unit tests:** Required for all business logic. Quality over quantity. Test
   behaviour, not implementation details.
 - **E2E tests:** Required for core user flows. Cover the critical paths that
   users depend on.
@@ -769,10 +810,10 @@ project changes. Do not begin implementation until the plan is approved.
 
 When asked to generate a PR description, create a `PR_DESCRIPTION.md` file in
 the project root (this file is gitignored and must never be committed). Follow
-the PR template at `.github/PULL_REQUEST_TEMPLATE.md` exactly — copy the entire
+the PR template at `.github/PULL_REQUEST_TEMPLATE.md` exactly. Copy the entire
 template, do not remove any section or HTML comment, and fill in each section
 based on actual changes. Checkbox option lines are never removed, reworded, or
-reordered — filling means ticking them in place. Verify the finished description
+reordered. Filling means ticking them in place. Verify the finished description
 against the PR template with a diff before presenting it: the only permitted
 differences are ticked checkboxes, the filled issue link, and added prose in
 placeholder positions.
@@ -782,18 +823,22 @@ asked to create a PR. Only create an actual pull request when explicitly told to
 do so. If permission is unclear, ask the user for it rather than refusing
 outright.
 
-**PR titles:** PR titles MUST be concise descriptions of the actual changes —
-not conventional commit prefixes. Do not use `chore:`, `feat:`, `fix:`, or any
-other conventional commit prefix in PR titles. Conventional commit prefixes
-belong in commit messages only.
+**PR titles:** PR titles MUST be concise descriptions of the actual changes, not
+conventional commit prefixes. Do not use `chore:`, `feat:`, `fix:`, or any other
+conventional commit prefix in PR titles. Conventional commit prefixes belong in
+commit messages only.
 
 **Basecamp issue link required:** Every PR MUST include a link to the related
 Basecamp issue (e.g.,
 `https://3.basecamp.com/6068767/buckets/44294088/card_tables/cards/9687289056`).
 If the user has not provided a Basecamp issue link, the agent MUST request one
 before proceeding. Without a valid Basecamp issue link, the agent is NOT
-permitted to push code or create a PR — even if the user grants permission to do
-so. No exceptions.
+permitted to push code or create a PR, even if the user grants permission to do
+so. This gate applies to planned human work and has no exceptions there.
+Automation is not planned work, so the gate does not apply to pull requests that
+automation opens, such as policy normalisation deployments, Dependabot updates,
+and pullfrog runs, and it does not apply to changes the user asks an agent to
+make inside those pull requests.
 
 **Labels:** Every PR MUST have appropriate labels applied. Available labels are
 defined in the `github-policies` repository's `policy.json` under
@@ -804,41 +849,49 @@ labels that are relevant to the changes in the PR.
 ## Commits
 
 **Commit messages:** Follow the conventional commit style (`feat:`, `fix:`,
-`chore:`, `ci:`, etc.). Emoji prefixes are NOT used for human-authored commits —
-they only appear on automated Dependabot commits.
+`chore:`, `ci:`, etc.). Emoji prefixes are NOT used for human-authored commits.
+They only appear on automated Dependabot commits.
+
+**Git-generated commits:** Commits whose subject git itself writes are exempt
+from the conventional commit style and use git's default message. This covers
+merge commits from `git merge` and revert commits from `git revert`, for example
+`Merge branch 'main' into feat/ticket-standard` and
+`Revert "feat: add user authentication"`. The conventional commit style governs
+commits that introduce a change. A git-generated subject is git's own record of
+the operation, not a change description.
 
 **No co-authored commits:** Agents MUST NOT add `Co-authored-by` trailers or any
 other attribution that certifies the work on the agent's behalf. Only humans can
-legally certify a contribution — the human submitter reviews the AI-generated
+legally certify a contribution. The human submitter reviews the AI-generated
 code and takes full responsibility for it. A `Signed-off-by` trailer is the
 human's Developer Certificate of Origin: when asked to commit, the agent ensures
 the human grants explicit permission for the sign-off first, then commits with
-`--signoff` so the human takes responsibility for the contribution in full — the
-sign-off is always the human's, never the agent's: the trailer is stamped with
-the committer's git identity, so the committer identity must describe the human,
-and the agent declines the sign-off wherever it does not. Following the rules
-the Linux kernel team enforce for AI coding assistants, an agent's role in a
-commit otherwise ends at the message body — no `Co-authored-by`, no other
-certification trailers. See
+`--signoff` so the human takes responsibility for the contribution in full. The
+sign-off is always the human's, never the agent's, because the trailer is
+stamped with the committer's git identity, so the committer identity must
+describe the human, and the agent declines the sign-off wherever it does not.
+Following the rules the Linux kernel team enforce for AI coding assistants, an
+agent's role in a commit otherwise ends at the message body, with no
+`Co-authored-by` and no other certification trailers. See
 [AI Coding Assistants — The Linux Kernel documentation](https://docs.kernel.org/process/coding-assistants.html).
 
 **Assisted-by attribution:** Where attribution for AI assistance is wanted, use
 an `Assisted-by: LLM` trailer in the commit message body rather than a co-author
 or sign-off trailer. It records that the contribution was produced with AI
 assistance without certifying or authoring it. This mirrors the kernel's
-`Assisted-by: LLM [TOOL1] [TOOL2]` format — optionally list specialised analysis
+`Assisted-by: LLM [TOOL1] [TOOL2]` format. Optionally list specialised analysis
 tools after `LLM`, but never list basic development tools (git, compilers,
 editors, linters). Only add the trailer when the user has asked for AI
-attribution; the default is no trailer at all.
+attribution. The default is no trailer at all.
 
 ## Branches
 
 Branches follow the conventional-commit type prefixes:
 `feat/<short-description>`, `fix/<short-description>`,
-`chore/<short-description>`, `ci/<short-description>`, etc. — kebab-case,
-lowercase, no ticket IDs. This is an org-wide convention; repository-specific
-branch naming schemes MUST NOT conflict with it. Automated branches
-(`automation/normalisation-`, `pullfrog/`) are exempt.
+`chore/<short-description>`, `ci/<short-description>`, etc., all kebab-case,
+lowercase, with no ticket IDs. This is an org-wide convention.
+Repository-specific branch naming schemes MUST NOT conflict with it. Automated
+branches (`automation/normalisation-`, `pullfrog/`) are exempt.
 
 ## Tickets
 
@@ -851,7 +904,7 @@ Always update documentation, configuration files, environment files, and related
 files as you go. Documentation must never be out of date. If a change affects
 `README.md`, `AGENTS.md`, `AGENTS.base.md` (via `github-policies`, humans only),
 `.env.example`, configuration files, or any other documentation, update them in
-the same change. Clean as you go — take ownership of every file you touch.
+the same change. Clean as you go. Take ownership of every file you touch.
 
 If formatting, linting, or other tooling fixes issues in files you did not
 originally author, do not revert those fixes. CI would break again. Accept
@@ -867,14 +920,14 @@ Every repository's AGENTS.md follows this section order:
 2. `## Organisation Standards` — the @AGENTS.base.md pointer, byte-identical in
    every repository, always the first section
 3. `## Strict Rules` — the standard organisation-standards lead-in followed by
-   repository-specific rules only; repositories without additional rules use the
+   repository-specific rules only. Repositories without additional rules use the
    standard "no additional strict rules" paragraph
 4. Repository-specific domain sections — free-form names (architecture, tech
    stack, domain mechanics), in the order that best explains the repository
 5. Closing sections in this order, each optional and present only where
    applicable: `## Commands`, `## CI/CD`, `## Known Issues`, `## Future Topics`
 
-`## Known Issues` — when present — opens with exactly this lead-in before the
+`## Known Issues` (when present) opens with exactly this lead-in before the
 bulleted entries:
 
 > Pre-existing problems documented so agents do not mistake them for regressions
