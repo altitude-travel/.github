@@ -315,7 +315,7 @@ devDependency) in follow-up commits on the normalisation branch.
 - **Package manager:** pnpm (Do not use `corepack` for this)
 - **Prefer:** `pnpm exec` over `pnpm dlx`
 - **Node.js engine:** `>=26.10.0` in `package.json` `engines` field
-- **Package manager version:** `pnpm@12.15.0` (exact pin) in `package.json`
+- **Package manager version:** `pnpm@12.16.1` (exact pin) in `package.json`
   `packageManager` field. The organisation pins pnpm exactly. Bump all
   repositories deliberately, together.
 - **Engine enforcement:** `pnpm-workspace.yaml` carries `engineStrict`, and
@@ -334,7 +334,7 @@ devDependency) in follow-up commits on the normalisation branch.
   `autoInstallPeers: true`, `dedupePeerDependents: true`,
   `strictPeerDependencies: true`, and `minimumReleaseAgeStrict: true`.
 - **Manifest and workspace standard:** every repository with a `package.json`
-  follows the canonical shapes below, with `packageManager: pnpm@12.15.0`
+  follows the canonical shapes below, with `packageManager: pnpm@12.16.1`
   (exact), `engines: { node: ">=26.10.0" }`, and `devEngines` with
   `packageManager` (`pnpm`, `>=12.8.1`) and `runtime` (`node`, `>=26.10.0`),
   both with `onFail` per the Engine enforcement bullet. Every
@@ -376,7 +376,7 @@ devDependency) in follow-up commits on the normalisation branch.
       "build": "<only where the repository is buildable>",
       "test": "<only where tests exist>"
     },
-    "packageManager": "pnpm@12.15.0",
+    "packageManager": "pnpm@12.16.1",
     "engines": { "node": ">=26.10.0" },
     "devEngines": {
       "packageManager": {
@@ -458,7 +458,7 @@ devDependency) in follow-up commits on the normalisation branch.
   their toolchain prerequisites in the README using exactly this wording:
   - [Node.js](https://nodejs.org/) **>= 26.10.0**, declared in `package.json`
     `engines` (mirrored in `devEngines`)
-  - [pnpm](https://pnpm.io) **12.15.0** (see `packageManager` in `package.json`)
+  - [pnpm](https://pnpm.io) **12.16.1** (see `packageManager` in `package.json`)
 
 ## Formatting and Linting
 
